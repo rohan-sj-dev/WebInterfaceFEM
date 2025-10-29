@@ -1,0 +1,209 @@
+# ===========================
+# Python / Flask Backend
+# ===========================
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# Flask
+instance/
+.webassets-cache
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+users.db
+
+# Logs
+*.log
+logs/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Uploads and outputs
+backend/uploads/*
+!backend/uploads/.gitkeep
+backend/outputs/*
+!backend/outputs/.gitkeep
+uploads/*
+!uploads/.gitkeep
+outputs/*
+!outputs/.gitkeep
+
+# Temporary files
+*.tmp
+*.temp
+*.pdf
+*.csv
+*.xlsx
+*.zip
+
+# ===========================
+# React / Node.js Frontend
+# ===========================
+
+# Dependencies
+node_modules/
+frontend/node_modules/
+/.pnp
+.pnp.js
+
+# Testing
+/coverage
+*.coverage
+
+# Production build
+frontend/build/
+frontend/dist/
+build/
+dist/
+
+# Misc
+.DS_Store
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# Package manager
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# IDE
+.vscode/
+.idea/
+
+# ===========================
+# ABAQUS / FEM Processing
+# ===========================
+
+# ABAQUS output files
+*.odb
+*.dat
+*.msg
+*.prt
+*.sim
+*.sta
+*.com
+*.log
+*.mdl
+*.stt
+*.lck
+*.023
+*.pac
+*.res
+*.abq
+*.ipm
+*.fil
+*.pes
+*.pmg
+
+# ABAQUS temporary files
+abaqus_jobs/
+fem_processing/abaqus_jobs/
+*.odb_f
+
+# ===========================
+# Machine Learning / Models
+# ===========================
+
+# Model files
+*.pt
+*.pth
+*.h5
+*.pkl
+*.ckpt
+*.safetensors
+
+# Training data
+hf_models_cache/
+local_yolo_training/
+*.weights
+
+# Datasets
+datasets/
+data/
+*.jpg
+*.jpeg
+*.png
+*.tif
+*.tiff
+
+# ===========================
+# Documentation
+# ===========================
+
+# Keep markdown files but ignore some patterns
+*.md~
+*.bak
+
+# ===========================
+# Project Specific
+# ===========================
+
+# Unstract cache
+.unstract/
+
+# Processing status
+job_status.json
+
+# Cleaned data
+fem_processing/cleaned_data/
+
+# Table extraction cache
+Table-Extracter/poppler/
+
+# ===========================
+# Security
+# ===========================
+
+# API keys and secrets (IMPORTANT!)
+*.key
+*.pem
+*.crt
+secrets.json
+config/secrets.py
+
+# Backup files
+*.backup
+*.bkp
+
+# ===========================
+# Git
+# ===========================
+
+# Keep Git folder
+!.git/
