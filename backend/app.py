@@ -14,34 +14,24 @@ from datetime import datetime, timedelta
 import logging
 import requests
 import time
+from dotenv import load_dotenv
 
-# UNSTRACT CONFIGURATION:
-# Set the UNSTRACT_API_URL environment variable to your Unstract instance URL
-# For Unstract on another system in the network: set UNSTRACT_API_URL=http://192.168.x.x/deployment/api/mock_org/test/
-# (Replace 192.168.x.x with the actual IP address of the system running Unstract)
-# For local Unstract: set UNSTRACT_API_URL=http://localhost/deployment/api/mock_org/test/
-# For production: set UNSTRACT_API_URL=https://your-unstract-domain.com/deployment/api/your_org/your_deployment/
-# Replace UNSTRACT_API_KEY below with your actual API key
+# Load environment variables from .env file
+load_dotenv()
 
-# Default Unstract URL - New deployment with single pass extraction disabled
-# This fixes the "highlight metadata missing or corrupted" error
-UNSTRACT_DEFAULT_URL = 'https://us-central.unstract.com/deployment/api/org_XYP7vV7oXBLVNmLG/invoice-extract/'
-UNSTRACT_DEFAULT_API_KEY = '50e45650-7179-465f-8226-5092f77ffadd'
+# UNSTRACT CONFIGURATION
+UNSTRACT_DEFAULT_URL = os.getenv('UNSTRACT_API_URL', 'https://us-central.unstract.com/deployment/api/org_XYP7vV7oXBLVNmLG/invoice-extract/')
+UNSTRACT_DEFAULT_API_KEY = os.getenv('UNSTRACT_API_KEY', '')
+UNSTRACT_QA_URL = os.getenv('UNSTRACT_QA_URL', None)
 
-# Optional: Separate workflow for custom Q&A (if you create one)
-# If you have a Q&A workflow, uncomment and add the deployment ID:
-# UNSTRACT_QA_URL = 'https://us-central.unstract.com/deployment/api/org_XYP7vV7oXBLVNmLG/YOUR_QA_WORKFLOW_ID/'
-UNSTRACT_QA_URL = None  # Set to None to use the same workflow for both
+# AWS TEXTRACT CONFIGURATION
+AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID', '')
+AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY', '')
+AWS_DEFAULT_REGION = os.getenv('AWS_DEFAULT_REGION', 'us-east-1')
 
-# DIRECT LLM CONFIGURATION (Alternative to Unstract for custom prompts)
-# Set your OpenAI API key here for direct GPT-4o calls
-# Set via environment variable
-ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '')  # For Claude (optional)
-
-# LLMWHISPERER CONFIGURATION (Document to Text Conversion)
-# LLMWhisperer is Unstract's OCR/document extraction API
-LLMWHISPERER_API_URL = 'https://llmwhisperer-api.us-central.unstract.com/api/v2'
-LLMWHISPERER_API_KEY = '_W3Zl_zJ223RYMmXg9X4CWYCfQ_EK9oM_-cobz1xaaM'
+# LLMWHISPERER CONFIGURATION
+LLMWHISPERER_API_URL = os.getenv('LLMWHISPERER_API_URL', 'https://llmwhisperer-api.us-central.unstract.com/api/v2')
+LLMWHISPERER_API_KEY = os.getenv('LLMWHISPERER_API_KEY', '')
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -363,9 +353,9 @@ def process_pdf_with_unstract(input_path, task_id, user_id, api_key=None, custom
             api_url = UNSTRACT_QA_URL
             logger.info(f"Using Unstract Q&A workflow for custom query")
         
-        # Use provided API key or default
+        # Use provided API key or default from .env
         if api_key is None:
-            api_key = os.environ.get('UNSTRACT_API_KEY', UNSTRACT_DEFAULT_API_KEY)
+            api_key = UNSTRACT_DEFAULT_API_KEY
         
         logger.info(f"Using Unstract Cloud API URL: {api_url}")
         logger.info(f"Custom prompts: {custom_prompts}")
@@ -680,7 +670,285 @@ def process_pdf_with_unstract(input_path, task_id, user_id, api_key=None, custom
         }
         logger.error(f"Unstract processing failed: {e}")
 
+def process_pdf_with_textract(input_path, task_id, user_id, custom_query=''):
+    """
+    Process PDF using AWS Textract for document analysis with custom queries
+    Supports: Text extraction, Tables, Forms, and Queries API
+    """
+    try:
+        processing_status[task_id] = {
+            'status': 'processing',
+            'message': 'Uploading to AWS Textract...',
+            'progress': 10,
+            'user_id': user_id
+        }
+        
+        # Check AWS credentials
+        if not AWS_ACCESS_KEY_ID or not AWS_SECRET_ACCESS_KEY:
+            raise Exception("AWS credentials not configured. Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables.")
+        
+        import boto3
+        from botocore.exceptions import ClientError
+        
+        # Initialize Textract client
+        textract_client = boto3.client(
+            'textract',
+            aws_access_key_id=AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+            region_name=AWS_DEFAULT_REGION
+        )
+        
+        logger.info(f"Processing with AWS Textract: {input_path}")
+        
+        # Read the PDF file
+        with open(input_path, 'rb') as document:
+            document_bytes = document.read()
+        
+        processing_status[task_id]['message'] = 'Analyzing document with Textract...'
+        processing_status[task_id]['progress'] = 30
+        
+        # Use Textract Queries feature if custom query is provided
+        if custom_query:
+            logger.info(f"Using Textract Queries API with query: {custom_query}")
+            
+            # Parse multiple queries (separated by newlines or semicolons)
+            queries = [q.strip() for q in custom_query.replace(';', '\n').split('\n') if q.strip()]
+            
+            # Prepare queries for Textract
+            query_config = {
+                'Queries': [{'Text': q, 'Alias': f'Query_{i+1}'} for i, q in enumerate(queries)]
+            }
+            
+            # Call Textract with Queries
+            response = textract_client.analyze_document(
+                Document={'Bytes': document_bytes},
+                FeatureTypes=['TABLES', 'FORMS', 'QUERIES'],
+                QueriesConfig=query_config
+            )
+        else:
+            # Standard document analysis (text, tables, forms)
+            logger.info("Using standard Textract analysis")
+            response = textract_client.analyze_document(
+                Document={'Bytes': document_bytes},
+                FeatureTypes=['TABLES', 'FORMS']
+            )
+        
+        processing_status[task_id]['message'] = 'Processing Textract results...'
+        processing_status[task_id]['progress'] = 70
+        
+        # Extract text, tables, and query results
+        extracted_data = parse_textract_response(response, custom_query)
+        
+        processing_status[task_id]['progress'] = 90
+        
+        # Save result to file
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        output_filename = f"textract_{timestamp}_{task_id[:8]}.txt"
+        output_path = os.path.join(OUTPUT_FOLDER, output_filename)
+        
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write(f"AWS Textract Extraction Results\n")
+            f.write(f"File: {os.path.basename(input_path)}\n")
+            f.write(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            if custom_query:
+                f.write(f"Custom Queries: {custom_query}\n")
+            f.write("=" * 80 + "\n\n")
+            f.write(extracted_data)
+        
+        logger.info(f"Saved Textract results to: {output_path}")
+        
+        # Update database
+        conn = sqlite3.connect('users.db')
+        cursor = conn.cursor()
+        cursor.execute(
+            'UPDATE processing_jobs SET status = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?',
+            ('completed', task_id)
+        )
+        conn.commit()
+        conn.close()
+        
+        processing_status[task_id] = {
+            'status': 'completed',
+            'message': 'AWS Textract extraction completed!',
+            'progress': 100,
+            'extraction_method': 'textract',
+            'output_file': output_filename,
+            'unstract_data': [{
+                'file': os.path.basename(input_path),
+                'status': 'Success',
+                'result': {
+                    'output': {
+                        'Textract_Extraction': extracted_data
+                    }
+                }
+            }],
+            'user_id': user_id
+        }
+        logger.info(f"AWS Textract processing completed for task {task_id}")
+        
+    except ClientError as e:
+        error_msg = f"AWS Textract API error: {e.response['Error']['Message']}"
+        processing_status[task_id] = {
+            'status': 'error',
+            'message': error_msg,
+            'progress': 0,
+            'user_id': user_id
+        }
+        logger.error(error_msg)
+    except Exception as e:
+        processing_status[task_id] = {
+            'status': 'error',
+            'message': f'Textract processing failed: {str(e)}',
+            'progress': 0,
+            'user_id': user_id
+        }
+        logger.error(f"Textract processing failed: {e}")
+
+def parse_textract_response(response, custom_query=''):
+    """Parse AWS Textract response and format results"""
+    result_text = ""
+    
+    # Extract query answers if queries were used
+    if custom_query:
+        result_text += "QUERY RESULTS:\n"
+        result_text += "=" * 80 + "\n\n"
+        
+        for block in response['Blocks']:
+            if block['BlockType'] == 'QUERY_RESULT':
+                query_alias = block.get('Query', {}).get('Alias', 'Unknown')
+                query_text = block.get('Query', {}).get('Text', '')
+                answer = block.get('Text', 'No answer found')
+                confidence = block.get('Confidence', 0)
+                
+                result_text += f"Q: {query_text}\n"
+                result_text += f"A: {answer}\n"
+                result_text += f"Confidence: {confidence:.1f}%\n\n"
+        
+        result_text += "\n" + "=" * 80 + "\n\n"
+    
+    # Extract full text
+    result_text += "EXTRACTED TEXT:\n"
+    result_text += "=" * 80 + "\n\n"
+    
+    lines = []
+    for block in response['Blocks']:
+        if block['BlockType'] == 'LINE':
+            lines.append(block['Text'])
+    
+    result_text += '\n'.join(lines)
+    result_text += "\n\n" + "=" * 80 + "\n\n"
+    
+    # Extract tables
+    tables = extract_tables_from_textract(response)
+    if tables:
+        result_text += "EXTRACTED TABLES:\n"
+        result_text += "=" * 80 + "\n\n"
+        
+        for i, table in enumerate(tables, 1):
+            result_text += f"Table {i}:\n"
+            result_text += table + "\n\n"
+    
+    # Extract key-value pairs (forms)
+    key_values = extract_key_values_from_textract(response)
+    if key_values:
+        result_text += "FORM FIELDS:\n"
+        result_text += "=" * 80 + "\n\n"
+        
+        for key, value in key_values.items():
+            result_text += f"{key}: {value}\n"
+    
+    return result_text
+
+def extract_tables_from_textract(response):
+    """Extract tables from Textract response"""
+    tables = []
+    blocks = response['Blocks']
+    block_map = {block['Id']: block for block in blocks}
+    
+    for block in blocks:
+        if block['BlockType'] == 'TABLE':
+            table = []
+            if 'Relationships' in block:
+                for relationship in block['Relationships']:
+                    if relationship['Type'] == 'CHILD':
+                        for cell_id in relationship['Ids']:
+                            cell = block_map[cell_id]
+                            if cell['BlockType'] == 'CELL':
+                                row_index = cell['RowIndex'] - 1
+                                col_index = cell['ColumnIndex'] - 1
+                                
+                                # Ensure table has enough rows
+                                while len(table) <= row_index:
+                                    table.append([])
+                                
+                                # Ensure row has enough columns
+                                while len(table[row_index]) <= col_index:
+                                    table[row_index].append('')
+                                
+                                # Get cell text
+                                cell_text = ''
+                                if 'Relationships' in cell:
+                                    for cell_relationship in cell['Relationships']:
+                                        if cell_relationship['Type'] == 'CHILD':
+                                            for word_id in cell_relationship['Ids']:
+                                                if word_id in block_map:
+                                                    word = block_map[word_id]
+                                                    if word['BlockType'] == 'WORD':
+                                                        cell_text += word['Text'] + ' '
+                                
+                                table[row_index][col_index] = cell_text.strip()
+            
+            # Convert table to CSV format
+            table_str = '\n'.join([','.join([f'"{cell}"' if ',' in cell else cell for cell in row]) for row in table])
+            tables.append(table_str)
+    
+    return tables
+
+def extract_key_values_from_textract(response):
+    """Extract key-value pairs (forms) from Textract response"""
+    key_values = {}
+    blocks = response['Blocks']
+    block_map = {block['Id']: block for block in blocks}
+    
+    for block in blocks:
+        if block['BlockType'] == 'KEY_VALUE_SET' and 'KEY' in block.get('EntityTypes', []):
+            key_text = ''
+            value_text = ''
+            
+            # Get key text
+            if 'Relationships' in block:
+                for relationship in block['Relationships']:
+                    if relationship['Type'] == 'CHILD':
+                        for child_id in relationship['Ids']:
+                            if child_id in block_map:
+                                child = block_map[child_id]
+                                if child['BlockType'] == 'WORD':
+                                    key_text += child['Text'] + ' '
+                    elif relationship['Type'] == 'VALUE':
+                        for value_id in relationship['Ids']:
+                            if value_id in block_map:
+                                value_block = block_map[value_id]
+                                if 'Relationships' in value_block:
+                                    for value_relationship in value_block['Relationships']:
+                                        if value_relationship['Type'] == 'CHILD':
+                                            for value_child_id in value_relationship['Ids']:
+                                                if value_child_id in block_map:
+                                                    value_child = block_map[value_child_id]
+                                                    if value_child['BlockType'] == 'WORD':
+                                                        value_text += value_child['Text'] + ' '
+            
+            if key_text:
+                key_values[key_text.strip()] = value_text.strip()
+    
+    return key_values
+
 def process_pdf_with_direct_llm(input_path, task_id, user_id, custom_prompt='', model='gpt-4o', use_text_extraction=True):
+    """
+    DEPRECATED: This function is replaced by process_pdf_with_textract
+    Redirects to Textract for better accuracy and cost
+    """
+    logger.warning("Direct LLM processing is deprecated. Using AWS Textract instead.")
+    return process_pdf_with_textract(input_path, task_id, user_id, custom_prompt)
     """
     Process PDF using direct LLM API calls (OpenAI GPT-4o or Anthropic Claude)
     This bypasses Unstract and allows true custom prompts
@@ -1505,11 +1773,12 @@ def upload_file_llmwhisperer():
         'filename': filename
     })
 
-@app.route('/api/upload_direct_llm', methods=['POST'])
+@app.route('/api/upload_textract', methods=['POST'])
+@app.route('/api/upload_direct_llm', methods=['POST'])  # Keep old endpoint for backwards compatibility
 @jwt_required()
-def upload_file_direct_llm():
-    """Upload file for direct LLM processing with custom prompts (GPT-4o/Claude)"""
-    print("=== DIRECT LLM UPLOAD ENDPOINT CALLED ===")
+def upload_file_textract():
+    """Upload file for AWS Textract processing with custom queries"""
+    print("=== AWS TEXTRACT UPLOAD ENDPOINT CALLED ===")
     
     user_id = int(get_jwt_identity())
     print(f"JWT validation successful, user_id: {user_id}")
@@ -1525,13 +1794,11 @@ def upload_file_direct_llm():
         print(f"Error: Invalid file type or empty filename: {file.filename}")
         return jsonify({'error': 'Invalid file type. Please upload a PDF file.'}), 400
     
-    # Get custom prompts from request
-    custom_prompt = request.form.get('custom_prompt', '')
-    print(f"Custom prompt received: {custom_prompt}")
-    
-    # Get model selection from request
-    model_name = request.form.get('model_name', 'gpt-4o')  # Default to GPT-4o
-    print(f"Model selected: {model_name}")
+    # Get custom query from request
+    custom_query = request.form.get('custom_prompt', '')  # Keep 'custom_prompt' for backwards compatibility
+    if not custom_query:
+        custom_query = request.form.get('custom_query', '')
+    print(f"Custom query received: {custom_query}")
     
     task_id = str(uuid.uuid4())
     filename = secure_filename(file.filename)
@@ -1551,23 +1818,23 @@ def upload_file_direct_llm():
 
     processing_status[task_id] = {
         'status': 'queued',
-        'message': 'File uploaded, queued for direct LLM processing',
+        'message': 'File uploaded, queued for AWS Textract processing',
         'progress': 0,
         'user_id': user_id
     }
 
     thread = threading.Thread(
-        target=process_pdf_with_direct_llm,
-        args=(input_path, task_id, user_id, custom_prompt, model_name)
+        target=process_pdf_with_textract,
+        args=(input_path, task_id, user_id, custom_query)
     )
     thread.start()
     
-    print(f"Direct LLM processing started for task_id: {task_id}")
+    print(f"AWS Textract processing started for task_id: {task_id}")
     return jsonify({
         'task_id': task_id,
-        'message': f'File uploaded successfully, processing with {model_name}',
+        'message': 'File uploaded successfully, processing with AWS Textract',
         'filename': filename,
-        'model': model_name
+        'has_custom_query': bool(custom_query)
     })
 
 @app.route('/api/upload_unstract', methods=['POST'])
@@ -1788,19 +2055,47 @@ def launch_abaqus():
         logger.info(f"Found ABAQUS at: {abaqus_exe}")
         
         try:
-
-            process = subprocess.Popen(
-                [abaqus_exe, 'cae'],  
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                creationflags=subprocess.CREATE_NEW_CONSOLE if os.name == 'nt' else 0
-            )
+            # Launch ABAQUS CLI (command environment) in a new window
+            # This opens the ABAQUS command prompt interface
+            if os.name == 'nt':  # Windows
+                # For ABAQUS, we want to open the Commands prompt first
+                # Then optionally launch CAE GUI
+                
+                # Option 1: Just open ABAQUS Commands environment (CLI)
+                # This gives user the ABAQUS> prompt to run commands
+                ps_command = f'Start-Process cmd.exe -ArgumentList "/k","{abaqus_exe}" -WindowStyle Normal'
+                
+                process = subprocess.Popen(
+                    ['powershell.exe', '-Command', ps_command],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    creationflags=subprocess.CREATE_NO_WINDOW
+                )
+                
+                # Wait a moment for CLI to initialize
+                import time
+                time.sleep(2)
+                
+                # Now launch CAE GUI in the background (optional - comment out if you only want CLI)
+                gui_command = f'Start-Process "{abaqus_exe}" -ArgumentList "cae" -WindowStyle Normal'
+                subprocess.Popen(
+                    ['powershell.exe', '-Command', gui_command],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    creationflags=subprocess.CREATE_NO_WINDOW
+                )
+            else:  # Linux/Mac
+                process = subprocess.Popen(
+                    [abaqus_exe, 'cae'],  
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE
+                )
             
-            logger.info(f"ABAQUS launched successfully with PID: {process.pid}")
+            logger.info(f"ABAQUS CLI and CAE launched successfully")
             
             return jsonify({
                 'success': True,
-                'message': f'ABAQUS launched successfully (PID: {process.pid})',
+                'message': f'ABAQUS CLI opened. You can now run ABAQUS commands. CAE GUI is loading...',
                 'abaqus_path': abaqus_exe
             })
             

@@ -45,16 +45,17 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 # Install dependencies
 pip install -r requirements.txt
 
-# Set environment variables (optional)
-# For Unstract custom deployment:
-# set UNSTRACT_API_URL=https://your-unstract-url/
-# set UNSTRACT_API_KEY=your-api-key
+# Configure environment variables
+cp .env.example .env
+# Edit .env and add your API keys (see ENV_SETUP.md for details)
 
 # Run the backend
 python app.py
 ```
 
 Backend will start on `http://localhost:5001`
+
+**Important:** See `backend/ENV_SETUP.md` for detailed configuration guide.
 
 ### 3. Frontend Setup
 ```bash
@@ -71,15 +72,24 @@ Frontend will start on `http://localhost:3000`
 
 ## 🔧 Configuration
 
-### Unstract API Configuration
+### Environment Variables
 
-Edit `backend/app.py` to configure your Unstract deployment:
+All API keys and configuration are stored in `backend/.env` file:
 
-```python
-# Line 28-31
-UNSTRACT_DEFAULT_URL = 'https://us-central.unstract.com/deployment/api/org_XYP7vV7oXBLVNmLG/invoicetest_1761711172126/'
-UNSTRACT_DEFAULT_API_KEY = 'your-api-key-here'
-```
+1. Copy the example file:
+   ```bash
+   cd backend
+   cp .env.example .env
+   ```
+
+2. Edit `.env` and add your API keys:
+   - `UNSTRACT_API_KEY` - Get from https://unstract.com
+   - `LLMWHISPERER_API_KEY` - Get from Unstract dashboard
+   - `AWS_ACCESS_KEY_ID` & `AWS_SECRET_ACCESS_KEY` - For AWS Textract (optional)
+
+3. See `backend/ENV_SETUP.md` for detailed setup instructions
+
+**Never commit `.env` to Git!** Use `.env.example` for sharing configuration structure.
 
 ### ABAQUS Configuration
 

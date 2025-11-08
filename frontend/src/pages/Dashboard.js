@@ -31,6 +31,38 @@ const Dashboard = () => {
   const [selectedModel, setSelectedModel] = useState('gpt-4-turbo');
   const [extractionMethod, setExtractionMethod] = useState('unstract'); // 'local', 'unstract', 'direct_llm'
 
+  // Helper function to parse CSV string into table data
+  const parseCSV = (csvString) => {
+    const lines = csvString.trim().split('\n');
+    if (lines.length === 0) return { headers: [], rows: [] };
+    
+    const parseCSVLine = (line) => {
+      const result = [];
+      let current = '';
+      let inQuotes = false;
+      
+      for (let i = 0; i < line.length; i++) {
+        const char = line[i];
+        
+        if (char === '"') {
+          inQuotes = !inQuotes;
+        } else if (char === ',' && !inQuotes) {
+          result.push(current.trim());
+          current = '';
+        } else {
+          current += char;
+        }
+      }
+      result.push(current.trim());
+      return result;
+    };
+    
+    const headers = parseCSVLine(lines[0]);
+    const rows = lines.slice(1).map(line => parseCSVLine(line));
+    
+    return { headers, rows };
+  };
+
   const onDrop = useCallback((acceptedFiles) => {
     if (acceptedFiles.length > 0) {
       setFile(acceptedFiles[0]);
@@ -142,8 +174,8 @@ const Dashboard = () => {
       // Set filename based on extraction method
       if (processedResults.extraction_method === 'llmwhisperer') {
         a.download = type === 'all' ? 'OCR_Results.zip' : 'extracted_text.txt';
-      } else if (processedResults.extraction_method === 'direct_llm') {
-        a.download = type === 'all' ? 'OCR_Results.zip' : 'llm_extraction.txt';
+      } else if (processedResults.extraction_method === 'direct_llm' || processedResults.extraction_method === 'textract') {
+        a.download = type === 'all' ? 'OCR_Results.zip' : 'textract_extraction.txt';
       } else {
         a.download = type === 'all' ? 'OCR_Results.zip' : 'searchable_document.pdf';
       }
@@ -284,7 +316,7 @@ const Dashboard = () => {
                       />
                       <div className="ml-3">
                         <span className="text-sm font-medium text-gray-900">Unstract API</span>
-                        <p className="text-xs text-gray-500">Cloud-based extraction with predefined invoice template (CSV only)</p>
+                        <p className="text-xs text-gray-500">Cloud-based Table Extraction</p>
                       </div>
                     </label>
                     
@@ -298,8 +330,8 @@ const Dashboard = () => {
                         className="h-4 w-4 mt-0.5 text-primary-600 border-gray-300 focus:ring-primary-500"
                       />
                       <div className="ml-3">
-                        <span className="text-sm font-medium text-gray-900">🎯 LLMWhisperer</span>
-                        <p className="text-xs text-gray-500">High-quality text extraction with layout preservation (Unstract OCR)</p>
+                        <span className="text-sm font-medium text-gray-900">LLMWhisperer</span>
+                        <p className="text-xs text-gray-500">Text extraction with layout preservation (Unstract)</p>
                       </div>
                     </label>
                     
@@ -313,64 +345,57 @@ const Dashboard = () => {
                         className="h-4 w-4 mt-0.5 text-primary-600 border-gray-300 focus:ring-primary-500"
                       />
                       <div className="ml-3">
-                        <span className="text-sm font-medium text-gray-900">Direct LLM (Custom Prompts)</span>
-                        <p className="text-xs text-gray-500">GPT-4o or Claude 3.5 with full custom prompt support</p>
+                        <span className="text-sm font-medium text-gray-900">AWS Textract (Custom Queries)</span>
+                        <p className="text-xs text-gray-500">Advanced document analysis with query support - extract specific data</p>
                       </div>
                     </label>
                   </div>
                 </div>
                 
-                {/* Model & Prompt Selection - Show for Unstract or Direct LLM */}
+                {/* Query/Prompt Input - Show for Unstract or Textract */}
                 {(extractionMethod === 'unstract' || extractionMethod === 'direct_llm') && (
                   <div className="space-y-4">
-                    {/* Model Selection */}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        AI Model
-                      </label>
-                      <select
-                        value={selectedModel}
-                        onChange={(e) => setSelectedModel(e.target.value)}
-                        className="input-field w-full"
-                      >
-                        {extractionMethod === 'direct_llm' ? (
-                          <>
-                            <option value="gpt-4o">GPT-4o (Recommended for tables)</option>
-                            <option value="gpt-4-turbo">GPT-4 Turbo</option>
-                            <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
-                          </>
-                        ) : (
-                          <>
-                            <option value="gpt-4-turbo">GPT-4 Turbo</option>
-                            <option value="azure-gpt-4o">Azure GPT-4o</option>
-                          </>
-                        )}
-                      </select>
-                      <p className="mt-1 text-xs text-gray-500">
-                        {extractionMethod === 'direct_llm' 
-                          ? 'GPT-4o has best table extraction accuracy' 
-                          : 'Choose the AI model for extraction'
-                        }
-                      </p>
-                    </div>
-                    
-                    {/* Custom Prompts */}
-                    {extractionMethod === 'direct_llm' && (
+                    {/* Model Selection - Only for Unstract */}
+                    {extractionMethod === 'unstract' && (
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Custom Extraction Prompt
+                          AI Model
                         </label>
-                        <textarea
-                          value={customPrompts}
-                          onChange={(e) => setCustomPrompts(e.target.value)}
-                          className="input-field w-full h-32 resize-none"
-                          placeholder="Enter your custom extraction instructions here...&#10;&#10;Example:&#10;Extract all invoice data including customer details, line items, and totals. Format as CSV with proper headers."
-                        />
+                        <select
+                          value={selectedModel}
+                          onChange={(e) => setSelectedModel(e.target.value)}
+                          className="input-field w-full"
+                        >
+                          <option value="gpt-4-turbo">GPT-4 Turbo</option>
+                          <option value="azure-gpt-4o">Azure GPT-4o</option>
+                        </select>
                         <p className="mt-1 text-xs text-gray-500">
-                          Specify exactly what data you want to extract and how to format it
+                          Choose the AI model for extraction
                         </p>
                       </div>
                     )}
+                    
+                    {/* Custom Query/Prompt */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        {extractionMethod === 'direct_llm' ? 'Custom Queries' : 'Custom Extraction Prompt'}
+                      </label>
+                      <textarea
+                        value={customPrompts}
+                        onChange={(e) => setCustomPrompts(e.target.value)}
+                        className="input-field w-full h-32 resize-none"
+                        placeholder={extractionMethod === 'direct_llm' 
+                          ? "Enter questions to extract from the document (one per line):\n\nExamples:\n- What is the invoice number?\n- What is the total amount?\n- Who is the customer?\n- What is the due date?"
+                          : "Enter your custom extraction instructions here...\n\nExample:\nExtract all invoice data including customer details, line items, and totals. Format as CSV with proper headers."
+                        }
+                      />
+                      <p className="mt-1 text-xs text-gray-500">
+                        {extractionMethod === 'direct_llm'
+                          ? 'AWS Textract will answer these specific questions from your document'
+                          : 'Specify exactly what data you want to extract and how to format it'
+                        }
+                      </p>
+                    </div>
                   </div>
                 )}
                 
@@ -686,33 +711,33 @@ const Dashboard = () => {
                       </div>
                     )}
                     
-                    {/* Unstract, Direct LLM & LLMWhisperer Success Results */}
-                    {(processedResults.extraction_method === 'unstract' || processedResults.extraction_method === 'direct_llm' || processedResults.extraction_method === 'llmwhisperer') && processedResults.unstract_data && processedResults.status !== 'error' && (
+                    {/* Unstract, Textract, Direct LLM & LLMWhisperer Success Results */}
+                    {(processedResults.extraction_method === 'unstract' || processedResults.extraction_method === 'direct_llm' || processedResults.extraction_method === 'textract' || processedResults.extraction_method === 'llmwhisperer') && processedResults.unstract_data && processedResults.status !== 'error' && (
                       <div className="space-y-4">
                         <div className={`border rounded-lg p-4 ${
-                          processedResults.extraction_method === 'direct_llm' 
+                          (processedResults.extraction_method === 'direct_llm' || processedResults.extraction_method === 'textract')
                             ? 'bg-purple-50 border-purple-200'
                             : processedResults.extraction_method === 'llmwhisperer'
                             ? 'bg-green-50 border-green-200' 
                             : 'bg-blue-50 border-blue-200'
                         }`}>
                           <h4 className={`text-sm font-semibold mb-2 ${
-                            processedResults.extraction_method === 'direct_llm'
+                            (processedResults.extraction_method === 'direct_llm' || processedResults.extraction_method === 'textract')
                               ? 'text-purple-900'
                               : processedResults.extraction_method === 'llmwhisperer'
                               ? 'text-green-900'
                               : 'text-blue-900'
                           }`}>
-                            {processedResults.extraction_method === 'direct_llm' 
-                              ? '🤖 Direct LLM Extraction Results'
+                            {(processedResults.extraction_method === 'direct_llm' || processedResults.extraction_method === 'textract')
+                              ? '📊 AWS Textract Extraction Results'
                               : processedResults.extraction_method === 'llmwhisperer'
                               ? '🎯 LLMWhisperer Text Extraction Results' 
                               : 'Unstract AI Extraction Results'
                             }
                           </h4>
                           
-                          {/* Download button for LLMWhisperer and Direct LLM */}
-                          {(processedResults.extraction_method === 'llmwhisperer' || processedResults.extraction_method === 'direct_llm') && (
+                          {/* Download button for LLMWhisperer and Textract */}
+                          {(processedResults.extraction_method === 'llmwhisperer' || processedResults.extraction_method === 'direct_llm' || processedResults.extraction_method === 'textract') && (
                             <button
                               onClick={() => handleDownload('pdf')}
                               className={`mt-2 w-full text-sm px-4 py-2 rounded transition-colors flex items-center justify-center ${
@@ -748,21 +773,63 @@ const Dashboard = () => {
                               <div className="space-y-3">
                                 {/* Display all outputs from the single invoice API */}
                                 {Object.entries(fileResult.result.output).map(([key, value]) => {
-                                  // Determine if this is CSV format
-                                  const isCSV = typeof value === 'string' && (
-                                    value.includes(',') && value.split('\n').length > 1
-                                  );
+                                  // Determine if this is CSV format (only for Unstract, not LLMWhisperer)
+                                  const isCSV = processedResults.extraction_method === 'unstract' && 
+                                                typeof value === 'string' && (
+                                                  value.includes(',') && value.split('\n').length > 1
+                                                );
+                                  
+                                  // Parse CSV data if it's CSV format and Unstract method
+                                  let tableData = null;
+                                  if (isCSV) {
+                                    tableData = parseCSV(value);
+                                  }
                                   
                                   return (
                                     <div key={key} className="border-t border-gray-100 pt-3">
                                       <h6 className="text-xs font-semibold text-gray-700 mb-2 flex items-center gap-2">
                                          {key.replace(/_/g, ' ').toUpperCase()}
                                       </h6>
-                                      <div className="bg-gray-50 rounded p-3 max-h-96 overflow-y-auto">
-                                        <pre className="text-xs text-gray-800 whitespace-pre-wrap font-mono">
-                                          {value}
-                                        </pre>
-                                      </div>
+                                      
+                                      {/* Render as table if CSV AND Unstract method, otherwise as text */}
+                                      {isCSV && tableData ? (
+                                        <div className="bg-white rounded border border-gray-200 overflow-auto max-h-96">
+                                          <table className="min-w-full divide-y divide-gray-200">
+                                            <thead className="bg-gray-50">
+                                              <tr>
+                                                {tableData.headers.map((header, idx) => (
+                                                  <th
+                                                    key={idx}
+                                                    className="px-4 py-2 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-r border-gray-200 last:border-r-0"
+                                                  >
+                                                    {header}
+                                                  </th>
+                                                ))}
+                                              </tr>
+                                            </thead>
+                                            <tbody className="bg-white divide-y divide-gray-200">
+                                              {tableData.rows.map((row, rowIdx) => (
+                                                <tr key={rowIdx} className="hover:bg-gray-50">
+                                                  {row.map((cell, cellIdx) => (
+                                                    <td
+                                                      key={cellIdx}
+                                                      className="px-4 py-2 text-xs text-gray-900 border-r border-gray-200 last:border-r-0 whitespace-nowrap"
+                                                    >
+                                                      {cell}
+                                                    </td>
+                                                  ))}
+                                                </tr>
+                                              ))}
+                                            </tbody>
+                                          </table>
+                                        </div>
+                                      ) : (
+                                        <div className="bg-gray-50 rounded p-3 max-h-96 overflow-y-auto">
+                                          <pre className="text-xs text-gray-800 whitespace-pre-wrap font-mono">
+                                            {value}
+                                          </pre>
+                                        </div>
+                                      )}
                                       
                                       {/* Download button for CSV data */}
                                       {isCSV && (
@@ -831,7 +898,7 @@ const Dashboard = () => {
                     )}
 
                     {/* Local OCR Results */}
-                    {processedResults.extraction_method !== 'unstract' && processedResults.extraction_method !== 'llmwhisperer' && processedResults.extraction_method !== 'direct_llm' && (
+                    {processedResults.extraction_method !== 'unstract' && processedResults.extraction_method !== 'llmwhisperer' && processedResults.extraction_method !== 'direct_llm' && processedResults.extraction_method !== 'textract' && (
                       <>
                         {/* Summary */}
                         <div className="bg-green-50 border border-green-200 rounded-lg p-4">

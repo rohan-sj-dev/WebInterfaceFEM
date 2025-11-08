@@ -18,13 +18,14 @@ ENV/
 # Flask
 instance/
 .webassets-cache
-
+.env.example
+ENV_SETUP.md
 # Database
 *.db
 *.sqlite
 *.sqlite3
 users.db
-
+AWS_TEXTRACT_INTEGRATION.md
 # Logs
 *.log
 logs/
