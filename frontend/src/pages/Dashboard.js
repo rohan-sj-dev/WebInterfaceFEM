@@ -104,6 +104,19 @@ const Dashboard = () => {
         // LLMWhisperer text extraction
         response = await ocrService.uploadFileLLMWhisperer(file);
         toast.success('File uploaded! Processing with LLMWhisperer...');
+      } else if (extractionMethod === 'searchable_pdf') {
+        // Searchable PDF creation
+        response = await ocrService.uploadFileSearchablePDF(file);
+        toast.success('File uploaded! Creating searchable PDF...');
+      } else if (extractionMethod === 'gpt4o_hybrid') {
+        // GPT-4o Hybrid extraction
+        if (!customPrompts || customPrompts.trim() === '') {
+          toast.error('Please provide a custom query for GPT-4o hybrid extraction');
+          setProcessing(false);
+          return;
+        }
+        response = await ocrService.uploadFileGPT4oHybrid(file, customPrompts);
+        toast.success('File uploaded! Processing with GPT-4o hybrid approach...');
       } else if (extractionMethod === 'direct_llm') {
         // Direct LLM calling (GPT-4o/Claude)
         response = await ocrService.uploadFileDirectLLM(file, customPrompts, selectedModel);
@@ -176,6 +189,8 @@ const Dashboard = () => {
         a.download = type === 'all' ? 'OCR_Results.zip' : 'extracted_text.txt';
       } else if (processedResults.extraction_method === 'direct_llm' || processedResults.extraction_method === 'textract') {
         a.download = type === 'all' ? 'OCR_Results.zip' : 'textract_extraction.txt';
+      } else if (processedResults.extraction_method === 'searchable_pdf') {
+        a.download = type === 'all' ? 'OCR_Results.zip' : 'searchable_document.pdf';
       } else {
         a.download = type === 'all' ? 'OCR_Results.zip' : 'searchable_document.pdf';
       }
@@ -349,11 +364,41 @@ const Dashboard = () => {
                         <p className="text-xs text-gray-500">Advanced document analysis with query support - extract specific data</p>
                       </div>
                     </label>
+                    
+                    <label className="flex items-start cursor-pointer">
+                      <input
+                        type="radio"
+                        name="extractionMethod"
+                        value="searchable_pdf"
+                        checked={extractionMethod === 'searchable_pdf'}
+                        onChange={(e) => setExtractionMethod(e.target.value)}
+                        className="h-4 w-4 mt-0.5 text-primary-600 border-gray-300 focus:ring-primary-500"
+                      />
+                      <div className="ml-3">
+                        <span className="text-sm font-medium text-gray-900">Create Searchable PDF</span>
+                        <p className="text-xs text-gray-500">Convert scanned PDF to searchable PDF (preserves formatting, enables text search)</p>
+                      </div>
+                    </label>
+                    
+                    <label className="flex items-start cursor-pointer">
+                      <input
+                        type="radio"
+                        name="extractionMethod"
+                        value="gpt4o_hybrid"
+                        checked={extractionMethod === 'gpt4o_hybrid'}
+                        onChange={(e) => setExtractionMethod(e.target.value)}
+                        className="h-4 w-4 mt-0.5 text-primary-600 border-gray-300 focus:ring-primary-500"
+                      />
+                      <div className="ml-3">
+                        <span className="text-sm font-medium text-gray-900">GPT-4o Hybrid (Multimodal)</span>
+                        <p className="text-xs text-gray-500">Advanced extraction using GPT-4o with both PDF images and LLMWhisperer text</p>
+                      </div>
+                    </label>
                   </div>
                 </div>
                 
-                {/* Query/Prompt Input - Show for Unstract or Textract */}
-                {(extractionMethod === 'unstract' || extractionMethod === 'direct_llm') && (
+                {/* Query/Prompt Input - Show for Unstract, Textract, or GPT-4o Hybrid */}
+                {(extractionMethod === 'unstract' || extractionMethod === 'direct_llm' || extractionMethod === 'gpt4o_hybrid') && (
                   <div className="space-y-4">
                     {/* Model Selection - Only for Unstract */}
                     {extractionMethod === 'unstract' && (
@@ -711,6 +756,64 @@ const Dashboard = () => {
                       </div>
                     )}
                     
+                    {/* GPT-4o Hybrid Results Display */}
+                    {processedResults.extraction_method === 'gpt4o_hybrid' && processedResults.status !== 'error' && (
+                      <div className="space-y-4">
+                        <div className="border rounded-lg p-4 bg-gradient-to-r from-purple-50 to-blue-50 border-purple-200">
+                          <h4 className="text-sm font-semibold mb-2 text-purple-900">
+                            🤖 GPT-4o Hybrid Extraction Results
+                          </h4>
+                          
+                          {/* Download button */}
+                          <button
+                            onClick={() => handleDownload('pdf')}
+                            className="mt-2 w-full text-sm px-4 py-2 rounded transition-colors flex items-center justify-center bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white"
+                          >
+                            <Download className="h-4 w-4 mr-2" />
+                            Download Full Results (.txt)
+                          </button>
+                          
+                          {/* Processing info */}
+                          {processedResults.pages_processed && (
+                            <div className="mt-3 text-xs text-purple-700">
+                              📄 Processed {processedResults.pages_processed} pages with multimodal analysis
+                            </div>
+                          )}
+                        </div>
+                        
+                        {/* GPT-4o Analysis */}
+                        {processedResults.gpt4o_response && (
+                          <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
+                            <h5 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                              <span className="text-purple-600">🎯</span> GPT-4o Analysis
+                            </h5>
+                            <div className="bg-gray-50 rounded p-3">
+                              <pre className="text-xs text-gray-800 whitespace-pre-wrap font-mono">
+                                {processedResults.gpt4o_response}
+                              </pre>
+                            </div>
+                          </div>
+                        )}
+                        
+                        {/* LLMWhisperer Extracted Text (preview) */}
+                        {processedResults.llmwhisperer_text && (
+                          <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
+                            <h5 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                              <span className="text-green-600">📝</span> LLMWhisperer Text (Preview)
+                            </h5>
+                            <div className="bg-gray-50 rounded p-3">
+                              <pre className="text-xs text-gray-700 whitespace-pre-wrap font-mono">
+                                {processedResults.llmwhisperer_text}
+                              </pre>
+                            </div>
+                            <p className="text-xs text-gray-500 mt-2">
+                              💡 Download the full file to see complete LLMWhisperer extracted text
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    
                     {/* Unstract, Textract, Direct LLM & LLMWhisperer Success Results */}
                     {(processedResults.extraction_method === 'unstract' || processedResults.extraction_method === 'direct_llm' || processedResults.extraction_method === 'textract' || processedResults.extraction_method === 'llmwhisperer') && processedResults.unstract_data && processedResults.status !== 'error' && (
                       <div className="space-y-4">
@@ -897,8 +1000,45 @@ const Dashboard = () => {
                       </div>
                     )}
 
+                    {/* Searchable PDF Results */}
+                    {processedResults.extraction_method === 'searchable_pdf' && (
+                      <>
+                        {/* Summary */}
+                        <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                          <div className="flex items-center justify-center mb-2">
+                            <CheckCircle className="h-6 w-6 text-green-600 mr-2" />
+                            <h4 className="text-md font-semibold text-green-900">
+                              Searchable PDF Created Successfully!
+                            </h4>
+                          </div>
+                          <p className="text-sm text-green-800 text-center">
+                            Your scanned PDF has been converted to a searchable PDF.
+                            You can now search for text using Ctrl+F or Cmd+F in any PDF reader.
+                          </p>
+                          <div className="mt-3 p-3 bg-white border border-green-200 rounded">
+                            <p className="text-xs text-gray-700 text-center">
+                              ✨ The original formatting and appearance are preserved<br/>
+                              🔍 Text layer added - you can now search and select text<br/>
+                              📄 Compatible with all PDF readers
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Download Button */}
+                        <div className="space-y-2">
+                          <button
+                            onClick={() => handleDownload('pdf')}
+                            className="w-full bg-green-600 hover:bg-green-700 text-white font-medium py-3 px-4 rounded-lg transition-colors flex items-center justify-center"
+                          >
+                            <Download className="h-5 w-5 mr-2" />
+                            Download Searchable PDF
+                          </button>
+                        </div>
+                      </>
+                    )}
+
                     {/* Local OCR Results */}
-                    {processedResults.extraction_method !== 'unstract' && processedResults.extraction_method !== 'llmwhisperer' && processedResults.extraction_method !== 'direct_llm' && processedResults.extraction_method !== 'textract' && (
+                    {processedResults.extraction_method !== 'unstract' && processedResults.extraction_method !== 'llmwhisperer' && processedResults.extraction_method !== 'direct_llm' && processedResults.extraction_method !== 'textract' && processedResults.extraction_method !== 'searchable_pdf' && (
                       <>
                         {/* Summary */}
                         <div className="bg-green-50 border border-green-200 rounded-lg p-4">

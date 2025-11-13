@@ -15,6 +15,11 @@ import logging
 import requests
 import time
 from dotenv import load_dotenv
+from io import BytesIO
+import pikepdf
+import base64
+from openai import OpenAI
+
 
 # Load environment variables from .env file
 load_dotenv()
@@ -32,6 +37,9 @@ AWS_DEFAULT_REGION = os.getenv('AWS_DEFAULT_REGION', 'us-east-1')
 # LLMWHISPERER CONFIGURATION
 LLMWHISPERER_API_URL = os.getenv('LLMWHISPERER_API_URL', 'https://llmwhisperer-api.us-central.unstract.com/api/v2')
 LLMWHISPERER_API_KEY = os.getenv('LLMWHISPERER_API_KEY', '')
+
+# OPENAI CONFIGURATION
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -942,6 +950,446 @@ def extract_key_values_from_textract(response):
     
     return key_values
 
+def create_searchable_pdf_from_textract(input_pdf_path, task_id, user_id):
+    """
+    Create a searchable PDF from scanned PDF using AWS Textract and PyMuPDF
+    Uses insert_textbox for proper full-word highlighting
+    Reference: https://aws.amazon.com/blogs/machine-learning/generating-searchable-pdfs-from-scanned-documents-automatically-with-amazon-textract/
+    """
+    try:
+        processing_status[task_id] = {
+            'status': 'processing',
+            'message': 'Starting searchable PDF creation...',
+            'progress': 5,
+            'user_id': user_id
+        }
+        
+        # Check AWS credentials
+        if not AWS_ACCESS_KEY_ID or not AWS_SECRET_ACCESS_KEY:
+            raise Exception("AWS credentials not configured.")
+        
+        import boto3
+        from botocore.exceptions import ClientError
+        
+        logger.info(f"Creating searchable PDF from: {input_pdf_path}")
+        
+        # Initialize Textract client
+        textract_client = boto3.client(
+            'textract',
+            aws_access_key_id=AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+            region_name=AWS_DEFAULT_REGION
+        )
+        
+        # Check file size
+        file_size = os.path.getsize(input_pdf_path)
+        file_size_mb = file_size / (1024 * 1024)
+        logger.info(f"PDF file size: {file_size_mb:.2f} MB")
+        
+        # AWS Textract synchronous limit is 5 MB
+        if file_size_mb > 5:
+            raise Exception(
+                f"PDF file is too large ({file_size_mb:.2f} MB). "
+                f"AWS Textract synchronous API supports files up to 5 MB. "
+                f"Please use a smaller file or split the PDF into smaller parts."
+            )
+        
+        processing_status[task_id]['message'] = 'Analyzing document with Textract...'
+        processing_status[task_id]['progress'] = 10
+        
+        # Read the PDF file
+        with open(input_pdf_path, 'rb') as document:
+            document_bytes = document.read()
+        
+        logger.info(f"Calling Textract with {len(document_bytes)} bytes...")
+        
+        # Call Textract to detect text with geometry
+        try:
+            logger.info("Calling Textract detect_document_text...")
+            response = textract_client.detect_document_text(
+                Document={'Bytes': document_bytes}
+            )
+            textract_blocks = response.get('Blocks', [])
+            logger.info(f"Textract succeeded. Blocks found: {len(textract_blocks)}")
+        except ClientError as e:
+            error_code = e.response['Error']['Code']
+            if 'UnsupportedDocument' in error_code or 'unsupported' in str(e).lower():
+                raise Exception(
+                    f"PDF format not supported by Textract. Common causes:\n"
+                    f"- Encrypted/password-protected PDFs\n"
+                    f"- PDFs with unusual encoding\n"
+                    f"- Corrupted PDF files\n"
+                    f"Solution: Re-save the PDF using Adobe Acrobat or a PDF converter"
+                )
+            raise
+        
+        # Count WORD blocks
+        word_blocks = [b for b in textract_blocks if b['BlockType'] == 'WORD']
+        logger.info(f"Found {len(word_blocks)} WORD blocks")
+        
+        processing_status[task_id]['message'] = 'Creating searchable PDF...'
+        processing_status[task_id]['progress'] = 40
+        
+        # Open PDF with PyMuPDF
+        pdf_doc = fitz.open(input_pdf_path)
+        
+        # Convert PDF pages to images and create new PDF with images
+        pdf_image_dpi = 200
+        pdf_doc_img = fitz.open()
+        
+        logger.info("Converting PDF pages to images...")
+        for ppi, pdf_page in enumerate(pdf_doc.pages()):
+            # Render page to image
+            pdf_pix_map = pdf_page.get_pixmap(dpi=pdf_image_dpi, colorspace="RGB")
+            # Create new page with same dimensions
+            pdf_page_img = pdf_doc_img.new_page(
+                width=pdf_page.rect.width, height=pdf_page.rect.height
+            )
+            # Insert image into page
+            pdf_page_img.insert_image(rect=pdf_page.rect, pixmap=pdf_pix_map)
+        
+        pdf_doc.close()
+        
+        processing_status[task_id]['message'] = 'Adding searchable text layer...'
+        processing_status[task_id]['progress'] = 60
+        
+        # Add invisible text to the image PDF
+        fontsize_initial = 15
+        print_step = 1000
+        
+        for blocki, block in enumerate(textract_blocks):
+            if blocki % print_step == 0:
+                logger.info(f"Processing blocks {blocki} to {blocki+print_step} out of {len(textract_blocks)}")
+                progress = 60 + int((blocki / len(textract_blocks)) * 30)
+                processing_status[task_id]['progress'] = progress
+            
+            if block["BlockType"] == "WORD":
+                # Get page (Textract uses 1-based indexing)
+                page_num = block.get('Page', 1) - 1  # Convert to 0-based
+                pdf_page = pdf_doc_img[page_num]
+                
+                # Get bounding box from Textract (normalized 0-1 coordinates)
+                textract_bbox = block['Geometry']['BoundingBox']
+                
+                # Convert to PDF coordinates
+                # Textract: origin at top-left, coordinates normalized
+                # PDF: origin at bottom-left, coordinates in points
+                left = textract_bbox['Left'] * pdf_page.rect.width
+                top = textract_bbox['Top'] * pdf_page.rect.height
+                width = textract_bbox['Width'] * pdf_page.rect.width
+                height = textract_bbox['Height'] * pdf_page.rect.height
+                
+                # Bottom and right edges
+                bottom = top + height
+                right = left + width
+                
+                # Get the text
+                text = block.get("Text", "")
+                if not text:
+                    continue
+                
+                # Calculate optimal font size to fit text in bbox
+                text_length = fitz.get_text_length(
+                    text, fontname="helv", fontsize=fontsize_initial
+                )
+                fontsize_optimal = int(
+                    math.floor((width / text_length) * fontsize_initial)
+                )
+                
+                # Insert invisible text using textbox for proper full-word highlighting
+                try:
+                    pdf_page.insert_textbox(
+                        fitz.Rect(left, top, right, bottom),
+                        text,
+                        fontname="helv",
+                        fontsize=fontsize_optimal,
+                        color=(0, 0, 0),
+                        align=fitz.TEXT_ALIGN_LEFT,
+                        render_mode=3,  # 3 = invisible
+                    )
+                except Exception as e:
+                    logger.warning(f"Could not add word '{text}': {e}")
+        
+        processing_status[task_id]['message'] = 'Saving searchable PDF...'
+        processing_status[task_id]['progress'] = 95
+        
+        # Save the searchable PDF
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        output_filename = f"searchable_{timestamp}_{task_id[:8]}.pdf"
+        output_path = os.path.join(OUTPUT_FOLDER, output_filename)
+        
+        pdf_doc_img.save(output_path)
+        pdf_doc_img.close()
+        
+        logger.info(f"Searchable PDF created successfully: {output_path}")
+        
+        # Update database
+        conn = sqlite3.connect('users.db')
+        cursor = conn.cursor()
+        cursor.execute(
+            'UPDATE processing_jobs SET status = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?',
+            ('completed', task_id)
+        )
+        conn.commit()
+        conn.close()
+        
+        processing_status[task_id] = {
+            'status': 'completed',
+            'message': 'Searchable PDF created successfully!',
+            'progress': 100,
+            'extraction_method': 'searchable_pdf',
+            'output_file': output_filename,
+            'searchable_pdf': output_filename,
+            'user_id': user_id
+        }
+        logger.info(f"Searchable PDF processing completed for task {task_id}")
+        
+    except ClientError as e:
+        error_msg = f"AWS Textract API error: {e.response['Error']['Message']}"
+        processing_status[task_id] = {
+            'status': 'error',
+            'message': error_msg,
+            'progress': 0,
+            'user_id': user_id
+        }
+        logger.error(error_msg)
+    except Exception as e:
+        processing_status[task_id] = {
+            'status': 'error',
+            'message': f'Searchable PDF creation failed: {str(e)}',
+            'progress': 0,
+            'user_id': user_id
+        }
+        logger.error(f"Searchable PDF creation failed: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+    try:
+        processing_status[task_id] = {
+            'status': 'processing',
+            'message': 'Starting searchable PDF creation...',
+            'progress': 5,
+            'user_id': user_id
+        }
+        
+        # Check AWS credentials
+        if not AWS_ACCESS_KEY_ID or not AWS_SECRET_ACCESS_KEY:
+            raise Exception("AWS credentials not configured.")
+        
+        import boto3
+        from botocore.exceptions import ClientError
+        from pdf2image import convert_from_path
+        import io
+        
+        logger.info(f"Creating searchable PDF from: {input_pdf_path}")
+        
+        # Initialize Textract client
+        textract_client = boto3.client(
+            'textract',
+            aws_access_key_id=AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+            region_name=AWS_DEFAULT_REGION
+        )
+        
+        # Read original PDF to get page count
+        pdf_reader = PdfReader(input_pdf_path)
+        total_pages = len(pdf_reader.pages)
+        
+        # Check file size
+        file_size = os.path.getsize(input_pdf_path)
+        file_size_mb = file_size / (1024 * 1024)
+        logger.info(f"PDF file size: {file_size_mb:.2f} MB, Pages: {total_pages}")
+        
+        # AWS Textract synchronous limit is 5 MB
+        if file_size_mb > 5:
+            raise Exception(
+                f"PDF file is too large ({file_size_mb:.2f} MB). "
+                f"AWS Textract synchronous API supports files up to 5 MB. "
+                f"Please use a smaller file or split the PDF into smaller parts."
+            )
+        
+        processing_status[task_id]['message'] = f'Analyzing {total_pages} pages with Textract...'
+        processing_status[task_id]['progress'] = 10
+        
+        # Read the PDF file
+        with open(input_pdf_path, 'rb') as document:
+            document_bytes = document.read()
+        
+        logger.info(f"Calling Textract with {len(document_bytes)} bytes...")
+        
+        # Call Textract to detect text with geometry
+        try:
+            logger.info("Calling Textract detect_document_text...")
+            response = textract_client.detect_document_text(
+                Document={'Bytes': document_bytes}
+            )
+            logger.info(f"Textract succeeded. Blocks found: {len(response.get('Blocks', []))}")
+        except ClientError as e:
+            error_code = e.response['Error']['Code']
+            if 'UnsupportedDocument' in error_code or 'unsupported' in str(e).lower():
+                raise Exception(
+                    f"PDF format not supported by Textract. Common causes:\n"
+                    f"- Encrypted/password-protected PDFs\n"
+                    f"- PDFs with unusual encoding\n"
+                    f"- Corrupted PDF files\n"
+                    f"Solution: Re-save the PDF using Adobe Acrobat or a PDF converter"
+                )
+            raise
+        
+        processing_status[task_id]['message'] = 'Creating searchable PDF...'
+        processing_status[task_id]['progress'] = 40
+        
+        # Parse Textract response to get text with coordinates
+        blocks = response.get('Blocks', [])
+        
+        # Group words by page
+        words_by_page = {}
+        for block in blocks:
+            if block['BlockType'] == 'WORD':
+                page_num = block.get('Page', 1)
+                if page_num not in words_by_page:
+                    words_by_page[page_num] = []
+                words_by_page[page_num].append(block)
+        
+        logger.info(f"Found text on {len(words_by_page)} pages")
+        
+        # Create searchable PDF using pikepdf
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        output_filename = f"searchable_{timestamp}_{task_id[:8]}.pdf"
+        output_path = os.path.join(OUTPUT_FOLDER, output_filename)
+        
+        # Open original PDF
+        pdf = pikepdf.open(input_pdf_path)
+        
+        # Process each page
+        for page_idx in range(len(pdf.pages)):
+            page_num = page_idx + 1  # Textract uses 1-based indexing
+            page = pdf.pages[page_idx]
+            
+            # Get page dimensions
+            mediabox = page.MediaBox
+            page_width = float(mediabox[2] - mediabox[0])
+            page_height = float(mediabox[3] - mediabox[1])
+            
+            # Get words for this page
+            page_words = words_by_page.get(page_num, [])
+            logger.info(f"Page {page_num}: {len(page_words)} words, size: {page_width}x{page_height} points")
+            
+            if not page_words:
+                continue
+            
+            # Create invisible text overlay using reportlab
+            packet = io.BytesIO()
+            can = canvas.Canvas(packet, pagesize=(page_width, page_height))
+            
+            # Configure for invisible text
+            can.setFillColorRGB(0, 0, 0, alpha=0)  # Transparent
+            
+            for word_block in page_words:
+                text = word_block.get('Text', '')
+                if not text:
+                    continue
+                
+                # Get bounding box (normalized coordinates 0-1)
+                geometry = word_block.get('Geometry', {})
+                bbox = geometry.get('BoundingBox', {})
+                
+                # Convert normalized coordinates to PDF points
+                left = bbox.get('Left', 0) * page_width
+                top = bbox.get('Top', 0) * page_height
+                width = bbox.get('Width', 0) * page_width
+                height = bbox.get('Height', 0) * page_height
+                
+                # PDF coordinate system: origin at bottom-left
+                # Textract: origin at top-left, so we need to flip Y
+                x = left
+                y = page_height - top - height
+                
+                # Estimate font size based on height
+                # Use 85% of height as font size for better fit
+                font_size = max(height * 0.85, 1)
+                
+                try:
+                    # Set font (Helvetica is standard and widely supported)
+                    can.setFont("Helvetica", font_size)
+                    
+                    # Create text object for invisible rendering
+                    text_obj = can.beginText(x, y)
+                    text_obj.setTextRenderMode(3)  # 3 = invisible (neither fill nor stroke)
+                    text_obj.textLine(text)
+                    can.drawText(text_obj)
+                    
+                except Exception as e:
+                    logger.warning(f"Could not add word '{text}' at ({x},{y}): {e}")
+            
+            # Save the canvas
+            can.save()
+            packet.seek(0)
+            
+            # Merge the text layer with the original page
+            try:
+                overlay_pdf = pikepdf.open(packet)
+                if len(overlay_pdf.pages) > 0:
+                    # Add the overlay as a new content stream
+                    page.add_overlay(overlay_pdf.pages[0])
+                    logger.info(f"Page {page_num}: Text layer added successfully")
+            except Exception as e:
+                logger.error(f"Page {page_num}: Failed to add overlay: {e}")
+            
+            # Update progress
+            progress = 40 + int((page_idx + 1) / len(pdf.pages) * 50)
+            processing_status[task_id]['progress'] = progress
+        
+        # Save the searchable PDF
+        pdf.save(output_path)
+        pdf.close()
+        
+        logger.info(f"Searchable PDF created successfully: {output_path}")
+        
+        processing_status[task_id]['message'] = 'Finalizing...'
+        processing_status[task_id]['progress'] = 95
+        
+        # Update database
+        conn = sqlite3.connect('users.db')
+        cursor = conn.cursor()
+        cursor.execute(
+            'UPDATE processing_jobs SET status = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?',
+            ('completed', task_id)
+        )
+        conn.commit()
+        conn.close()
+        
+        processing_status[task_id] = {
+            'status': 'completed',
+            'message': 'Searchable PDF created successfully!',
+            'progress': 100,
+            'extraction_method': 'searchable_pdf',
+            'output_file': output_filename,
+            'searchable_pdf': output_filename,
+            'user_id': user_id
+        }
+        logger.info(f"Searchable PDF processing completed for task {task_id}")
+        
+    except ClientError as e:
+        error_msg = f"AWS Textract API error: {e.response['Error']['Message']}"
+        processing_status[task_id] = {
+            'status': 'error',
+            'message': error_msg,
+            'progress': 0,
+            'user_id': user_id
+        }
+        logger.error(error_msg)
+    except Exception as e:
+        processing_status[task_id] = {
+            'status': 'error',
+            'message': f'Searchable PDF creation failed: {str(e)}',
+            'progress': 0,
+            'user_id': user_id
+        }
+        logger.error(f"Searchable PDF creation failed: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+
+
 def process_pdf_with_direct_llm(input_path, task_id, user_id, custom_prompt='', model='gpt-4o', use_text_extraction=True):
     """
     DEPRECATED: This function is replaced by process_pdf_with_textract
@@ -1570,6 +2018,250 @@ def process_pdf_with_llmwhisperer(input_path, task_id, user_id):
         }
         logger.error(f"LLMWhisperer processing failed: {e}")
 
+def process_pdf_with_gpt4o_hybrid(input_path, task_id, user_id, custom_query):
+    """
+    Process PDF using GPT-4o multimodal approach:
+    1. Extract text using LLMWhisperer (for clean text content)
+    2. Send both PDF images and extracted text to GPT-4o
+    3. Use custom query to analyze both visual and textual information
+    """
+    try:
+        processing_status[task_id] = {
+            'status': 'processing',
+            'message': 'Starting GPT-4o hybrid extraction...',
+            'progress': 5,
+            'user_id': user_id
+        }
+        
+        # Initialize OpenAI client
+        if not OPENAI_API_KEY:
+            raise Exception("OpenAI API key not configured")
+        
+        client = OpenAI(api_key=OPENAI_API_KEY)
+        
+        # Step 1: Extract text using LLMWhisperer
+        logger.info(f"Step 1/3: Extracting text with LLMWhisperer for {input_path}")
+        processing_status[task_id]['message'] = 'Extracting text with LLMWhisperer...'
+        processing_status[task_id]['progress'] = 10
+        
+        # Read file as binary data
+        with open(input_path, 'rb') as f:
+            file_bytes = f.read()
+        
+        # Prepare headers for LLMWhisperer
+        headers = {
+            'unstract-key': LLMWHISPERER_API_KEY,
+            'Content-Type': 'application/octet-stream'
+        }
+        
+        params = {
+            'mode': 'high_quality',
+            'output_mode': 'layout_preserving',
+            'page_seperator': '<<<PAGE_BREAK>>>',
+        }
+        
+        # Submit to LLMWhisperer
+        response = requests.post(
+            f'{LLMWHISPERER_API_URL}/whisper',
+            headers=headers,
+            params=params,
+            data=file_bytes,
+            timeout=300
+        )
+        
+        if response.status_code != 202:
+            raise Exception(f"LLMWhisperer submission failed: {response.status_code} - {response.text}")
+        
+        whisper_data = response.json()
+        whisper_hash = whisper_data.get('whisper_hash')
+        logger.info(f"LLMWhisperer processing started. Hash: {whisper_hash}")
+        
+        processing_status[task_id]['progress'] = 20
+        
+        # Poll for LLMWhisperer completion
+        max_retries = 60
+        retry_count = 0
+        extracted_text = ""
+        
+        while retry_count < max_retries:
+            time.sleep(5)
+            
+            status_response = requests.get(
+                f'{LLMWHISPERER_API_URL}/whisper-status',
+                headers=headers,
+                params={'whisper_hash': whisper_hash},
+                timeout=30
+            )
+            
+            if status_response.status_code == 200:
+                status_data = status_response.json()
+                status = status_data.get('status')
+                
+                if status == 'processed':
+                    # Retrieve text
+                    retrieve_response = requests.get(
+                        f'{LLMWHISPERER_API_URL}/whisper-retrieve',
+                        headers=headers,
+                        params={'whisper_hash': whisper_hash, 'text_only': 'false'},
+                        timeout=60
+                    )
+                    
+                    if retrieve_response.status_code == 200:
+                        result_data = retrieve_response.json()
+                        extracted_text = result_data.get('result_text', '')
+                        logger.info(f"LLMWhisperer extraction complete. Text length: {len(extracted_text)}")
+                        break
+                elif status in ['failed', 'error']:
+                    raise Exception(f"LLMWhisperer processing failed: {status_data.get('message', 'Unknown error')}")
+            
+            retry_count += 1
+            processing_status[task_id]['progress'] = min(20 + retry_count, 50)
+        
+        if not extracted_text:
+            raise Exception("Failed to extract text from LLMWhisperer")
+        
+        # Step 2: Convert PDF pages to base64 images
+        logger.info(f"Step 2/3: Converting PDF to images")
+        processing_status[task_id]['message'] = 'Converting PDF pages to images...'
+        processing_status[task_id]['progress'] = 55
+        
+        import fitz  # PyMuPDF
+        
+        pdf_doc = fitz.open(input_path)
+        page_images = []
+        
+        # Limit to first 10 pages to avoid token limits
+        max_pages = min(len(pdf_doc), 10)
+        
+        for page_num in range(max_pages):
+            page = pdf_doc[page_num]
+            # Render at moderate resolution for GPT-4o (300 DPI)
+            pix = page.get_pixmap(dpi=150)
+            img_bytes = pix.tobytes("png")
+            base64_image = base64.b64encode(img_bytes).decode('utf-8')
+            page_images.append(base64_image)
+            
+            processing_status[task_id]['progress'] = 55 + int((page_num + 1) / max_pages * 20)
+        
+        pdf_doc.close()
+        logger.info(f"Converted {len(page_images)} pages to images")
+        
+        # Step 3: Send to GPT-4o with multimodal prompt
+        logger.info(f"Step 3/3: Querying GPT-4o with custom query")
+        processing_status[task_id]['message'] = 'Analyzing with GPT-4o...'
+        processing_status[task_id]['progress'] = 80
+        
+        # Build multimodal messages
+        messages = [
+            {
+                "role": "system",
+                "content": """You are an expert document analysis assistant with access to both visual and textual information from a PDF document.
+
+You have:
+1. Visual representation (images) of the PDF pages
+2. Extracted text content from the document
+
+Use both sources to provide the most accurate and comprehensive answer to the user's query. Consider:
+- Visual layout, formatting, tables, charts, diagrams
+- Text content for semantic understanding
+- Spatial relationships between elements
+- Any visual cues that text alone might miss"""
+            }
+        ]
+        
+        # Add PDF page images
+        content_parts = []
+        for i, img_base64 in enumerate(page_images):
+            content_parts.append({
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/png;base64,{img_base64}",
+                    "detail": "high"
+                }
+            })
+        
+        # Add extracted text
+        content_parts.append({
+            "type": "text",
+            "text": f"""**Extracted Text Content:**
+```
+{extracted_text[:10000]}  # Limit text to avoid token overflow
+```
+
+**User Query:**
+{custom_query}
+
+Please analyze both the visual PDF pages and the extracted text to answer the query comprehensively."""
+        })
+        
+        messages.append({
+            "role": "user",
+            "content": content_parts
+        })
+        
+        # Call GPT-4o Vision API
+        logger.info("Calling GPT-4o Vision API...")
+        completion = client.chat.completions.create(
+            model="gpt-4o",
+            messages=messages,
+            max_tokens=2000,
+            temperature=0.3
+        )
+        
+        gpt4o_response = completion.choices[0].message.content
+        logger.info(f"GPT-4o response received: {len(gpt4o_response)} characters")
+        
+        # Save results
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        output_filename = f"gpt4o_hybrid_{timestamp}_{task_id[:8]}.txt"
+        output_path = os.path.join(OUTPUT_FOLDER, output_filename)
+        
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write(f"GPT-4o Hybrid Extraction Results\n")
+            f.write(f"File: {os.path.basename(input_path)}\n")
+            f.write(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"Custom Query: {custom_query}\n")
+            f.write("=" * 80 + "\n\n")
+            f.write("GPT-4o Analysis:\n")
+            f.write(gpt4o_response)
+            f.write("\n\n" + "=" * 80 + "\n\n")
+            f.write("LLMWhisperer Extracted Text:\n")
+            f.write(extracted_text)
+        
+        logger.info(f"Saved GPT-4o results to: {output_path}")
+        
+        # Update database
+        conn = sqlite3.connect('users.db')
+        cursor = conn.cursor()
+        cursor.execute(
+            'UPDATE processing_jobs SET status = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?',
+            ('completed', task_id)
+        )
+        conn.commit()
+        conn.close()
+        
+        processing_status[task_id] = {
+            'status': 'completed',
+            'message': 'GPT-4o hybrid extraction completed!',
+            'progress': 100,
+            'extraction_method': 'gpt4o_hybrid',
+            'output_file': output_filename,
+            'gpt4o_response': gpt4o_response,
+            'llmwhisperer_text': extracted_text[:1000] + "..." if len(extracted_text) > 1000 else extracted_text,
+            'pages_processed': len(page_images),
+            'user_id': user_id
+        }
+        logger.info(f"GPT-4o hybrid processing completed for task {task_id}")
+        
+    except Exception as e:
+        processing_status[task_id] = {
+            'status': 'error',
+            'message': f'GPT-4o hybrid processing failed: {str(e)}',
+            'progress': 0,
+            'user_id': user_id
+        }
+        logger.error(f"GPT-4o hybrid processing failed: {e}")
+
 @app.route('/api/register', methods=['POST'])
 def register():
     data = request.get_json()
@@ -1835,6 +2527,130 @@ def upload_file_textract():
         'message': 'File uploaded successfully, processing with AWS Textract',
         'filename': filename,
         'has_custom_query': bool(custom_query)
+    })
+
+print("DEBUG: After upload_file_textract function, about to register searchable PDF route...")
+
+# Register searchable PDF route
+print("DEBUG: Registering searchable PDF route...")
+
+@app.route('/api/upload_searchable_pdf', methods=['POST'])
+@jwt_required()
+def upload_file_searchable_pdf():
+    """Upload scanned PDF and convert to searchable PDF using AWS Textract"""
+    print("=== SEARCHABLE PDF UPLOAD ENDPOINT CALLED ===")
+    
+    user_id = int(get_jwt_identity())
+    print(f"JWT validation successful, user_id: {user_id}")
+    
+    if 'file' not in request.files:
+        print("Error: No file provided")
+        return jsonify({'error': 'No file provided'}), 400
+    
+    file = request.files['file']
+    print(f"File received: {file.filename}")
+    
+    if file.filename == '' or not allowed_file(file.filename):
+        print(f"Error: Invalid file type or empty filename: {file.filename}")
+        return jsonify({'error': 'Invalid file type. Please upload a PDF file.'}), 400
+    
+    task_id = str(uuid.uuid4())
+    filename = secure_filename(file.filename)
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    input_filename = f"{timestamp}_{filename}"
+    input_path = os.path.join(UPLOAD_FOLDER, input_filename)
+    file.save(input_path)
+
+    conn = sqlite3.connect('users.db')
+    cursor = conn.cursor()
+    cursor.execute(
+        'INSERT INTO processing_jobs (id, user_id, filename, status, created_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)',
+        (task_id, user_id, filename, 'processing')
+    )
+    conn.commit()
+    conn.close()
+
+    processing_status[task_id] = {
+        'status': 'queued',
+        'message': 'File uploaded, queued for searchable PDF creation',
+        'progress': 0,
+        'user_id': user_id
+    }
+
+    thread = threading.Thread(
+        target=create_searchable_pdf_from_textract,
+        args=(input_path, task_id, user_id)
+    )
+    thread.start()
+    
+    print(f"Searchable PDF creation started for task_id: {task_id}")
+    return jsonify({
+        'task_id': task_id,
+        'message': 'File uploaded successfully, creating searchable PDF',
+        'filename': filename
+    })
+
+@app.route('/api/upload_gpt4o_hybrid', methods=['POST'])
+@jwt_required()
+def upload_file_gpt4o_hybrid():
+    """Upload PDF for GPT-4o hybrid extraction (combines LLMWhisperer text + GPT-4o vision)"""
+    print("=== GPT-4O HYBRID UPLOAD ENDPOINT CALLED ===")
+    
+    user_id = int(get_jwt_identity())
+    print(f"JWT validation successful, user_id: {user_id}")
+    
+    if 'file' not in request.files:
+        print("Error: No file provided")
+        return jsonify({'error': 'No file provided'}), 400
+    
+    file = request.files['file']
+    print(f"File received: {file.filename}")
+    
+    if file.filename == '' or not allowed_file(file.filename):
+        print(f"Error: Invalid file type or empty filename: {file.filename}")
+        return jsonify({'error': 'Invalid file type. Please upload a PDF file.'}), 400
+    
+    # Get custom query from request
+    custom_query = request.form.get('custom_prompts', '')
+    if not custom_query or custom_query.strip() == '':
+        return jsonify({'error': 'Custom query is required for GPT-4o hybrid extraction'}), 400
+    
+    print(f"Custom query received: {custom_query}")
+    
+    task_id = str(uuid.uuid4())
+    filename = secure_filename(file.filename)
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    input_filename = f"{timestamp}_{filename}"
+    input_path = os.path.join(UPLOAD_FOLDER, input_filename)
+    file.save(input_path)
+
+    conn = sqlite3.connect('users.db')
+    cursor = conn.cursor()
+    cursor.execute(
+        'INSERT INTO processing_jobs (id, user_id, filename, status, created_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)',
+        (task_id, user_id, filename, 'processing')
+    )
+    conn.commit()
+    conn.close()
+
+    processing_status[task_id] = {
+        'status': 'queued',
+        'message': 'File uploaded, queued for GPT-4o hybrid extraction',
+        'progress': 0,
+        'user_id': user_id
+    }
+
+    thread = threading.Thread(
+        target=process_pdf_with_gpt4o_hybrid,
+        args=(input_path, task_id, user_id, custom_query)
+    )
+    thread.start()
+    
+    print(f"GPT-4o hybrid processing started for task_id: {task_id}")
+    return jsonify({
+        'task_id': task_id,
+        'message': 'File uploaded successfully, processing with GPT-4o hybrid approach',
+        'filename': filename
     })
 
 @app.route('/api/upload_unstract', methods=['POST'])

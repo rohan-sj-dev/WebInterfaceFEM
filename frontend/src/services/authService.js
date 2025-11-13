@@ -119,6 +119,29 @@ export const ocrService = {
     });
   },
 
+  uploadFileSearchablePDF: async (file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    return await api.post('/upload_searchable_pdf', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+  },
+
+  uploadFileGPT4oHybrid: async (file, customPrompts) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('custom_prompts', customPrompts);
+
+    return await api.post('/upload_gpt4o_hybrid', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+  },
+
   getStatus: async (taskId) => {
     return await api.get(`/status/${taskId}`);
   },

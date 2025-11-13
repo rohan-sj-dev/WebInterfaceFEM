@@ -56,6 +56,9 @@ uploads/*
 !uploads/.gitkeep
 outputs/*
 !outputs/.gitkeep
+GPT4O_HYBRID_FEATURE.md
+IMPLEMENTATION_COMPLETE.md
+QUICK_START_VISION_AI.md
 
 # Temporary files
 *.tmp
