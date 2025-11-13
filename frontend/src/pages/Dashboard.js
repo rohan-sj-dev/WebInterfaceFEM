@@ -108,6 +108,15 @@ const Dashboard = () => {
         // Searchable PDF creation
         response = await ocrService.uploadFileSearchablePDF(file);
         toast.success('File uploaded! Creating searchable PDF...');
+      } else if (extractionMethod === 'gpt4o_vision') {
+        // GPT-4o Vision extraction (fast)
+        if (!customPrompts || customPrompts.trim() === '') {
+          toast.error('Please provide a custom query for GPT-4o Vision extraction');
+          setProcessing(false);
+          return;
+        }
+        response = await ocrService.uploadFileGPT4oVision(file, customPrompts);
+        toast.success('File uploaded! Processing with GPT-4o Vision (fast)...');
       } else if (extractionMethod === 'gpt4o_hybrid') {
         // GPT-4o Hybrid extraction
         if (!customPrompts || customPrompts.trim() === '') {
@@ -361,7 +370,7 @@ const Dashboard = () => {
                       />
                       <div className="ml-3">
                         <span className="text-sm font-medium text-gray-900">AWS Textract (Custom Queries)</span>
-                        <p className="text-xs text-gray-500">Advanced document analysis with query support - extract specific data</p>
+                        <p className="text-xs text-gray-500">Queries - extract specific data</p>
                       </div>
                     </label>
                     
@@ -376,7 +385,22 @@ const Dashboard = () => {
                       />
                       <div className="ml-3">
                         <span className="text-sm font-medium text-gray-900">Create Searchable PDF</span>
-                        <p className="text-xs text-gray-500">Convert scanned PDF to searchable PDF (preserves formatting, enables text search)</p>
+                        <p className="text-xs text-gray-500">Convert scanned PDF to searchable PDF</p>
+                      </div>
+                    </label>
+                    
+                    <label className="flex items-start cursor-pointer">
+                      <input
+                        type="radio"
+                        name="extractionMethod"
+                        value="gpt4o_vision"
+                        checked={extractionMethod === 'gpt4o_vision'}
+                        onChange={(e) => setExtractionMethod(e.target.value)}
+                        className="h-4 w-4 mt-0.5 text-primary-600 border-gray-300 focus:ring-primary-500"
+                      />
+                      <div className="ml-3">
+                        <span className="text-sm font-medium text-gray-900">GPT-4o Vision</span>
+                        <p className="text-xs text-gray-500">AI-powered query extraction using GPT-4o vision</p>
                       </div>
                     </label>
                     
@@ -390,15 +414,15 @@ const Dashboard = () => {
                         className="h-4 w-4 mt-0.5 text-primary-600 border-gray-300 focus:ring-primary-500"
                       />
                       <div className="ml-3">
-                        <span className="text-sm font-medium text-gray-900">GPT-4o Hybrid (Multimodal)</span>
-                        <p className="text-xs text-gray-500">Advanced extraction using GPT-4o with both PDF images and LLMWhisperer text</p>
+                        <span className="text-sm font-medium text-gray-900">GPT-4o (Multimodal)</span>
+                        <p className="text-xs text-gray-500">GPT-4o with both PDF images and LLMWhisperer text</p>
                       </div>
                     </label>
                   </div>
                 </div>
                 
-                {/* Query/Prompt Input - Show for Unstract, Textract, or GPT-4o Hybrid */}
-                {(extractionMethod === 'unstract' || extractionMethod === 'direct_llm' || extractionMethod === 'gpt4o_hybrid') && (
+                {/* Query/Prompt Input - Show for Unstract, Textract, GPT-4o Vision, or GPT-4o Hybrid */}
+                {(extractionMethod === 'unstract' || extractionMethod === 'direct_llm' || extractionMethod === 'gpt4o_vision' || extractionMethod === 'gpt4o_hybrid') && (
                   <div className="space-y-4">
                     {/* Model Selection - Only for Unstract */}
                     {extractionMethod === 'unstract' && (
@@ -753,6 +777,48 @@ const Dashboard = () => {
                             </div>
                           </div>
                         </div>
+                      </div>
+                    )}
+                    
+                    {/* GPT-4o Vision Results Display (Fast) */}
+                    {processedResults.extraction_method === 'gpt4o_vision' && processedResults.status !== 'error' && (
+                      <div className="space-y-4">
+                        <div className="border rounded-lg p-4 bg-gradient-to-r from-blue-50 to-cyan-50 border-blue-200">
+                          <h4 className="text-sm font-semibold mb-2 text-blue-900 flex items-center gap-2">
+                            ⚡ GPT-4o Vision Extraction Results
+                            <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">Fast Mode</span>
+                          </h4>
+                          
+                          {/* Download button */}
+                          <button
+                            onClick={() => handleDownload('pdf')}
+                            className="mt-2 w-full text-sm px-4 py-2 rounded transition-colors flex items-center justify-center bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white"
+                          >
+                            <Download className="h-4 w-4 mr-2" />
+                            Download Results (.txt)
+                          </button>
+                          
+                          {/* Processing info */}
+                          {processedResults.pages_processed && (
+                            <div className="mt-3 text-xs text-blue-700">
+                              📄 Processed {processedResults.pages_processed} pages with GPT-4o Vision
+                            </div>
+                          )}
+                        </div>
+                        
+                        {/* GPT-4o Analysis */}
+                        {processedResults.gpt4o_response && (
+                          <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
+                            <h5 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                              <span className="text-blue-600">🎯</span> GPT-4o Vision Analysis
+                            </h5>
+                            <div className="bg-gray-50 rounded p-3">
+                              <pre className="text-xs text-gray-800 whitespace-pre-wrap font-mono">
+                                {processedResults.gpt4o_response}
+                              </pre>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                     

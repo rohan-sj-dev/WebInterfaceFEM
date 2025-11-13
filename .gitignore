@@ -105,6 +105,7 @@ lerna-debug.log*
 package-lock.json
 yarn.lock
 pnpm-lock.yaml
+GPT4O_COMPARISON.md
 
 # IDE
 .vscode/

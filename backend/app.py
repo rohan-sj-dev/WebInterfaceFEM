@@ -2262,6 +2262,164 @@ Please analyze both the visual PDF pages and the extracted text to answer the qu
         }
         logger.error(f"GPT-4o hybrid processing failed: {e}")
 
+def process_pdf_with_gpt4o_vision(input_path, task_id, user_id, custom_query):
+    """
+    Process PDF using GPT-4o Vision API only (faster - no LLMWhisperer)
+    Converts PDF to images and sends to GPT-4o with custom query
+    """
+    try:
+        processing_status[task_id] = {
+            'status': 'processing',
+            'message': 'Starting GPT-4o Vision extraction...',
+            'progress': 10,
+            'user_id': user_id
+        }
+        
+        # Initialize OpenAI client
+        if not OPENAI_API_KEY:
+            raise Exception("OpenAI API key not configured")
+        
+        client = OpenAI(api_key=OPENAI_API_KEY)
+        
+        # Convert PDF pages to base64 images
+        logger.info(f"Converting PDF to images: {input_path}")
+        processing_status[task_id]['message'] = 'Converting PDF pages to images...'
+        processing_status[task_id]['progress'] = 20
+        
+        import fitz  # PyMuPDF
+        
+        pdf_doc = fitz.open(input_path)
+        page_images = []
+        
+        # Limit to first 10 pages to avoid token limits
+        max_pages = min(len(pdf_doc), 10)
+        
+        for page_num in range(max_pages):
+            page = pdf_doc[page_num]
+            # Render at moderate resolution for GPT-4o (150 DPI)
+            pix = page.get_pixmap(dpi=150)
+            img_bytes = pix.tobytes("png")
+            base64_image = base64.b64encode(img_bytes).decode('utf-8')
+            page_images.append(base64_image)
+            
+            processing_status[task_id]['progress'] = 20 + int((page_num + 1) / max_pages * 30)
+        
+        pdf_doc.close()
+        logger.info(f"Converted {len(page_images)} pages to images")
+        
+        # Send to GPT-4o Vision API
+        logger.info(f"Querying GPT-4o Vision with custom query")
+        processing_status[task_id]['message'] = 'Analyzing with GPT-4o Vision...'
+        processing_status[task_id]['progress'] = 60
+        
+        # Build multimodal messages
+        messages = [
+            {
+                "role": "system",
+                "content": """You are an expert document analysis assistant with advanced vision capabilities.
+
+Analyze the provided PDF document images carefully and answer the user's query with precision.
+
+Consider:
+- Visual layout, formatting, tables, charts, diagrams
+- Text content and its organization
+- Spatial relationships between elements
+- Any visual patterns or structures
+- Headers, footers, page numbers, and document structure
+
+Provide detailed, accurate, and well-structured responses."""
+            }
+        ]
+        
+        # Add PDF page images
+        content_parts = []
+        for i, img_base64 in enumerate(page_images):
+            content_parts.append({
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/png;base64,{img_base64}",
+                    "detail": "high"
+                }
+            })
+        
+        # Add user query
+        content_parts.append({
+            "type": "text",
+            "text": f"""**User Query:**
+{custom_query}
+
+Please analyze the document images above and provide a comprehensive answer to this query."""
+        })
+        
+        messages.append({
+            "role": "user",
+            "content": content_parts
+        })
+        
+        # Call GPT-4o Vision API
+        logger.info("Calling GPT-4o Vision API...")
+        processing_status[task_id]['progress'] = 70
+        
+        completion = client.chat.completions.create(
+            model="gpt-4o",
+            messages=messages,
+            max_tokens=2000,
+            temperature=0.3
+        )
+        
+        gpt4o_response = completion.choices[0].message.content
+        logger.info(f"GPT-4o Vision response received: {len(gpt4o_response)} characters")
+        
+        processing_status[task_id]['progress'] = 90
+        
+        # Save results
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        output_filename = f"gpt4o_vision_{timestamp}_{task_id[:8]}.txt"
+        output_path = os.path.join(OUTPUT_FOLDER, output_filename)
+        
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write(f"GPT-4o Vision Extraction Results\n")
+            f.write(f"File: {os.path.basename(input_path)}\n")
+            f.write(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"Pages Processed: {len(page_images)}\n")
+            f.write(f"Custom Query: {custom_query}\n")
+            f.write("=" * 80 + "\n\n")
+            f.write("GPT-4o Vision Analysis:\n")
+            f.write(gpt4o_response)
+        
+        logger.info(f"Saved GPT-4o Vision results to: {output_path}")
+        
+        # Update database
+        conn = sqlite3.connect('users.db')
+        cursor = conn.cursor()
+        cursor.execute(
+            'UPDATE processing_jobs SET status = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?',
+            ('completed', task_id)
+        )
+        conn.commit()
+        conn.close()
+        
+        processing_status[task_id] = {
+            'status': 'completed',
+            'message': 'GPT-4o Vision extraction completed!',
+            'progress': 100,
+            'extraction_method': 'gpt4o_vision',
+            'output_file': output_filename,
+            'gpt4o_response': gpt4o_response,
+            'pages_processed': len(page_images),
+            'user_id': user_id
+        }
+        logger.info(f"GPT-4o Vision processing completed for task {task_id}")
+        
+    except Exception as e:
+        processing_status[task_id] = {
+            'status': 'error',
+            'message': f'GPT-4o Vision processing failed: {str(e)}',
+            'progress': 0,
+            'user_id': user_id
+        }
+        logger.error(f"GPT-4o Vision processing failed: {e}")
+
 @app.route('/api/register', methods=['POST'])
 def register():
     data = request.get_json()
@@ -2587,6 +2745,69 @@ def upload_file_searchable_pdf():
     return jsonify({
         'task_id': task_id,
         'message': 'File uploaded successfully, creating searchable PDF',
+        'filename': filename
+    })
+
+@app.route('/api/upload_gpt4o_vision', methods=['POST'])
+@jwt_required()
+def upload_file_gpt4o_vision():
+    """Upload PDF for GPT-4o Vision extraction (fast - PDF images only, no LLMWhisperer)"""
+    print("=== GPT-4O VISION UPLOAD ENDPOINT CALLED ===")
+    
+    user_id = int(get_jwt_identity())
+    print(f"JWT validation successful, user_id: {user_id}")
+    
+    if 'file' not in request.files:
+        print("Error: No file provided")
+        return jsonify({'error': 'No file provided'}), 400
+    
+    file = request.files['file']
+    print(f"File received: {file.filename}")
+    
+    if file.filename == '' or not allowed_file(file.filename):
+        print(f"Error: Invalid file type or empty filename: {file.filename}")
+        return jsonify({'error': 'Invalid file type. Please upload a PDF file.'}), 400
+    
+    # Get custom query from request
+    custom_query = request.form.get('custom_prompts', '')
+    if not custom_query or custom_query.strip() == '':
+        return jsonify({'error': 'Custom query is required for GPT-4o Vision extraction'}), 400
+    
+    print(f"Custom query received: {custom_query}")
+    
+    task_id = str(uuid.uuid4())
+    filename = secure_filename(file.filename)
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    input_filename = f"{timestamp}_{filename}"
+    input_path = os.path.join(UPLOAD_FOLDER, input_filename)
+    file.save(input_path)
+
+    conn = sqlite3.connect('users.db')
+    cursor = conn.cursor()
+    cursor.execute(
+        'INSERT INTO processing_jobs (id, user_id, filename, status, created_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)',
+        (task_id, user_id, filename, 'processing')
+    )
+    conn.commit()
+    conn.close()
+
+    processing_status[task_id] = {
+        'status': 'queued',
+        'message': 'File uploaded, queued for GPT-4o Vision extraction',
+        'progress': 0,
+        'user_id': user_id
+    }
+
+    thread = threading.Thread(
+        target=process_pdf_with_gpt4o_vision,
+        args=(input_path, task_id, user_id, custom_query)
+    )
+    thread.start()
+    
+    print(f"GPT-4o Vision processing started for task_id: {task_id}")
+    return jsonify({
+        'task_id': task_id,
+        'message': 'File uploaded successfully, processing with GPT-4o Vision',
         'filename': filename
     })
 
