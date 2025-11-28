@@ -1,0 +1,81 @@
+*Heading
+ABAQUS/Standard Analysis: Simple Tension Test for Sample A32880
+
+*Preprint, echo=NO, model=NO, history=NO, database=NO
+
+*Node
+1, 0.0, 0.0
+2, 0.0, 1.0
+3, 1.0, 1.0
+4, 1.0, 0.0
+
+*Element, type=CPE4R
+1, 1, 2, 3, 4
+
+*Material, name=A32880_Material
+*Density
+7800.
+*Elastic
+210000., 0.3
+*Plastic
+0.0, 0.0
+0.021, 46.0
+0.0237, 47.15
+0.025, 48.3
+0.028, 49.45
+0.03, 50.6
+0.033, 51.75
+0.036, 52.9
+0.04, 54.05
+0.044, 55.2
+0.048, 56.35
+0.053, 57.5
+0.055, 58.075
+0.058, 58.65
+0.06, 59.225
+0.066, 60.375
+0.07, 60.95
+0.076, 62.1
+0.084, 63.25
+0.093, 64.4
+0.109, 65.55
+0.145, 66.7
+0.185, 67.85
+0.2, 69.0
+0.22, 69.0
+0.28, 69.0
+0.3, 69.0
+0.32, 69.0
+0.35, 69.0
+0.4, 69.0
+0.5, 69.0
+
+*Section, elset=ALL, material=A32880_Material
+*Solid Section, integration=FULL
+
+*Boundary
+1, 1, 1, 0.0
+1, 2, 2, 0.0
+4, 1, 1, 0.0
+4, 2, 2, 0.0
+
+*Amplitude, name=AMP1
+0., 0.
+1., 1.
+
+*Step, name=Tension, time period=1.0
+*Static, Riks
+*Displacement, node set=TOP_NODES, amplitude=AMP1
+2, 2, 0.5
+*End Step
+
+*Node Set, name=TOP_NODES
+2, 3
+
+*History Output, number-interval=10
+U, S
+
+*Node Output
+U, S
+
+*End

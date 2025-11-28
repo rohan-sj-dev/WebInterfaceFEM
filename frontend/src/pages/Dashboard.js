@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { 
   Upload, 
@@ -30,6 +30,11 @@ const Dashboard = () => {
   const [customPrompts, setCustomPrompts] = useState('');
   const [selectedModel, setSelectedModel] = useState('gpt-4-turbo');
   const [extractionMethod, setExtractionMethod] = useState('unstract'); // 'local', 'unstract', 'direct_llm'
+  const [serialNumber, setSerialNumber] = useState('');
+  const [simRunning, setSimRunning] = useState(false);
+  const [simLog, setSimLog] = useState('');
+  const [simStatus, setSimStatus] = useState(null);
+  const simPollRef = useRef(null);
 
   // Helper function to parse CSV string into table data
   const parseCSV = (csvString) => {
@@ -100,7 +105,16 @@ const Dashboard = () => {
       let response;
       
       // Choose extraction method
-      if (extractionMethod === 'llmwhisperer') {
+      if (extractionMethod === 'abaqus_fem') {
+        // ABAQUS FEM Integration
+        if (!serialNumber || serialNumber.trim() === '') {
+          toast.error('Please provide a serial number for ABAQUS FEM processing');
+          setProcessing(false);
+          return;
+        }
+        response = await ocrService.uploadFileAbaqusFEM(file, serialNumber);
+        toast.success('File uploaded! Extracting dimensions and stress-strain data...');
+      } else if (extractionMethod === 'llmwhisperer') {
         // LLMWhisperer text extraction
         response = await ocrService.uploadFileLLMWhisperer(file);
         toast.success('File uploaded! Processing with LLMWhisperer...');
@@ -126,6 +140,14 @@ const Dashboard = () => {
         }
         response = await ocrService.uploadFileGPT4oHybrid(file, customPrompts);
         toast.success('File uploaded! Processing with GPT-4o hybrid approach...');
+      } else if (extractionMethod === 'glm_table_extraction') {
+        // GLM-4.5V Table Extraction
+        response = await ocrService.uploadFileGLMTableExtraction(file, customPrompts);
+        toast.success('File uploaded! Extracting tables with GLM-4.5V...');
+      } else if (extractionMethod === 'glm_abaqus_generator') {
+        // GLM ABAQUS Generator with Serial Number
+        response = await ocrService.uploadFileGLMAbaqusGenerator(file, serialNumber);
+        toast.success(`File uploaded! Generating ABAQUS file for ${serialNumber}...`);
       } else if (extractionMethod === 'direct_llm') {
         // Direct LLM calling (GPT-4o/Claude)
         response = await ocrService.uploadFileDirectLLM(file, customPrompts, selectedModel);
@@ -229,6 +251,46 @@ const Dashboard = () => {
       toast.error(`Failed to launch ABAQUS: ${error.response?.data?.error || error.message}`);
     }
   };
+
+  const handleRunSimulation = async () => {
+    if (!processedResults) return;
+    setSimRunning(true);
+    setSimLog('');
+    setSimStatus('queued');
+
+    try {
+      await ocrService.runSimulation(processedResults.taskId);
+
+      // start polling for log/status
+      simPollRef.current = setInterval(async () => {
+        try {
+          const res = await ocrService.getSimulationLog(processedResults.taskId);
+          const data = res.data || res;
+          setSimLog(data.log || '');
+          const status = data.simulation?.status || data.status || null;
+          setSimStatus(status);
+
+          if (status === 'completed' || status === 'failed') {
+            clearInterval(simPollRef.current);
+            setSimRunning(false);
+          }
+        } catch (err) {
+          clearInterval(simPollRef.current);
+          setSimRunning(false);
+        }
+      }, 2000);
+
+    } catch (err) {
+      setSimRunning(false);
+      toast.error('Failed to start simulation');
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (simPollRef.current) clearInterval(simPollRef.current);
+    };
+  }, []);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-primary-50 to-white">
@@ -418,11 +480,77 @@ const Dashboard = () => {
                         <p className="text-xs text-gray-500">GPT-4o with both PDF images and LLMWhisperer text</p>
                       </div>
                     </label>
+                    
+                    <label className="flex items-start cursor-pointer">
+                      <input
+                        type="radio"
+                        name="extractionMethod"
+                        value="abaqus_fem"
+                        checked={extractionMethod === 'abaqus_fem'}
+                        onChange={(e) => setExtractionMethod(e.target.value)}
+                        className="h-4 w-4 mt-0.5 text-primary-600 border-gray-300 focus:ring-primary-500"
+                      />
+                      <div className="ml-3">
+                        <span className="text-sm font-medium text-gray-900">ABAQUS FEM Generator</span>
+                        <p className="text-xs text-gray-500">Extract dimensions & stress-strain, generate .inp file</p>
+                      </div>
+                    </label>
+                    
+                    <label className="flex items-start cursor-pointer">
+                      <input
+                        type="radio"
+                        name="extractionMethod"
+                        value="glm_table_extraction"
+                        checked={extractionMethod === 'glm_table_extraction'}
+                        onChange={(e) => setExtractionMethod(e.target.value)}
+                        className="h-4 w-4 mt-0.5 text-primary-600 border-gray-300 focus:ring-primary-500"
+                      />
+                      <div className="ml-3">
+                        <span className="text-sm font-medium text-gray-900">GLM-4.5V Table Extraction</span>
+                        <p className="text-xs text-gray-500">AI-powered table extraction using GLM vision model (CSV output)</p>
+                      </div>
+                    </label>
+                    
+                    <label className="flex items-start cursor-pointer">
+                      <input
+                        type="radio"
+                        name="extractionMethod"
+                        value="glm_abaqus_generator"
+                        checked={extractionMethod === 'glm_abaqus_generator'}
+                        onChange={(e) => setExtractionMethod(e.target.value)}
+                        className="h-4 w-4 mt-0.5 text-primary-600 border-gray-300 focus:ring-primary-500"
+                      />
+                      <div className="ml-3">
+                        <span className="text-sm font-medium text-gray-900">GLM ABAQUS Generator (Serial Number)</span>
+                        <p className="text-xs text-gray-500">Extract stress-strain data & dimensions by serial number, generate .inp file</p>
+                      </div>
+                    </label>
                   </div>
                 </div>
                 
-                {/* Query/Prompt Input - Show for Unstract, Textract, GPT-4o Vision, or GPT-4o Hybrid */}
-                {(extractionMethod === 'unstract' || extractionMethod === 'direct_llm' || extractionMethod === 'gpt4o_vision' || extractionMethod === 'gpt4o_hybrid') && (
+                {/* Serial Number Input - Show for ABAQUS FEM or GLM ABAQUS */}
+                {(extractionMethod === 'abaqus_fem' || extractionMethod === 'glm_abaqus_generator') && (
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Serial Number *
+                      </label>
+                      <input
+                        type="text"
+                        value={serialNumber}
+                        onChange={(e) => setSerialNumber(e.target.value)}
+                        placeholder="Enter specimen serial number..."
+                        className="input-field w-full"
+                      />
+                      <p className="text-xs text-gray-500 mt-1">
+                        The serial number will be used to identify dimensions and stress-strain data in the PDF
+                      </p>
+                    </div>
+                  </div>
+                )}
+                
+                {/* Query/Prompt Input - Show for Unstract, Textract, GPT-4o Vision, GPT-4o Hybrid, or GLM Table Extraction */}
+                {(extractionMethod === 'unstract' || extractionMethod === 'direct_llm' || extractionMethod === 'gpt4o_vision' || extractionMethod === 'gpt4o_hybrid' || extractionMethod === 'glm_table_extraction') && (
                   <div className="space-y-4">
                     {/* Model Selection - Only for Unstract */}
                     {extractionMethod === 'unstract' && (
@@ -461,6 +589,8 @@ const Dashboard = () => {
                       <p className="mt-1 text-xs text-gray-500">
                         {extractionMethod === 'direct_llm'
                           ? 'AWS Textract will answer these specific questions from your document'
+                          : extractionMethod === 'glm_table_extraction'
+                          ? 'Leave empty for default table extraction, or provide custom instructions for specialized extraction'
                           : 'Specify exactly what data you want to extract and how to format it'
                         }
                       </p>
@@ -797,6 +927,30 @@ const Dashboard = () => {
                             <Download className="h-4 w-4 mr-2" />
                             Download Results (.txt)
                           </button>
+                          {/* Run Simulation Button */}
+                          <button
+                            onClick={handleRunSimulation}
+                            disabled={simRunning}
+                            className="mt-3 w-full text-sm px-4 py-2 rounded transition-colors flex items-center justify-center bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white"
+                          >
+                            <Play className="h-4 w-4 mr-2" />
+                            {simRunning ? 'Simulation Running...' : 'Run Abaqus Simulation'}
+                          </button>
+
+                          {/* Simulation Status & Log */}
+                          {simStatus && (
+                            <div className="mt-3 text-center text-xs">
+                              <span className="inline-block px-2 py-1 rounded-full bg-gray-100 text-gray-700">
+                                Simulation: {simStatus}
+                              </span>
+                            </div>
+                          )}
+
+                          {simLog !== '' && (
+                            <div className="mt-3 bg-black text-white rounded p-3 text-xs font-mono overflow-auto max-h-48">
+                              <pre className="whitespace-pre-wrap">{simLog}</pre>
+                            </div>
+                          )}
                           
                           {/* Processing info */}
                           {processedResults.pages_processed && (
@@ -827,7 +981,7 @@ const Dashboard = () => {
                       <div className="space-y-4">
                         <div className="border rounded-lg p-4 bg-gradient-to-r from-purple-50 to-blue-50 border-purple-200">
                           <h4 className="text-sm font-semibold mb-2 text-purple-900">
-                            🤖 GPT-4o Hybrid Extraction Results
+                             GPT-4o Hybrid Extraction Results
                           </h4>
                           
                           {/* Download button */}
@@ -873,7 +1027,270 @@ const Dashboard = () => {
                               </pre>
                             </div>
                             <p className="text-xs text-gray-500 mt-2">
-                              💡 Download the full file to see complete LLMWhisperer extracted text
+                               Download the full file to see complete LLMWhisperer extracted text
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    
+                    {/* GLM-4.5V Table Extraction Results Display */}
+                    {processedResults.extraction_method === 'glm_table_extraction' && processedResults.status !== 'error' && (
+                      <div className="space-y-4">
+                        <div className="border rounded-lg p-4 bg-gradient-to-r from-teal-50 to-cyan-50 border-teal-200">
+                          <h4 className="text-sm font-semibold mb-2 text-teal-900 flex items-center gap-2">
+                            📊 GLM-4.5V Table Extraction Complete
+                          </h4>
+                          
+                          {/* Download CSV button */}
+                          <button
+                            onClick={async () => {
+                              try {
+                                const response = await ocrService.downloadProcessedFile(processedResults.taskId);
+                                const blob = new Blob([response.data], { type: 'text/csv' });
+                                const url = window.URL.createObjectURL(blob);
+                                const a = document.createElement('a');
+                                a.href = url;
+                                a.download = processedResults.output_filename || 'extracted_tables.csv';
+                                document.body.appendChild(a);
+                                a.click();
+                                window.URL.revokeObjectURL(url);
+                                document.body.removeChild(a);
+                                toast.success('CSV file downloaded!');
+                              } catch (error) {
+                                toast.error('Failed to download CSV file');
+                              }
+                            }}
+                            className="mt-2 w-full text-sm px-4 py-2 rounded transition-colors flex items-center justify-center bg-gradient-to-r from-teal-600 to-cyan-600 hover:from-teal-700 hover:to-cyan-700 text-white"
+                          >
+                            <Download className="h-4 w-4 mr-2" />
+                            Download Extracted Tables (CSV)
+                          </button>
+                          
+                          {/* Processing info */}
+                          {processedResults.pages_processed && (
+                            <div className="mt-3 text-xs text-teal-700">
+                              📄 Processed {processedResults.pages_processed} pages with GLM-4.5V vision model
+                            </div>
+                          )}
+                          
+                          {/* Token usage */}
+                          {processedResults.token_usage && (
+                            <div className="mt-2 text-xs text-teal-600">
+                              🔤 Tokens: {processedResults.token_usage.prompt_tokens || 0} input / {processedResults.token_usage.completion_tokens || 0} output / {processedResults.token_usage.total_tokens || 0} total
+                            </div>
+                          )}
+                        </div>
+                        
+                        {/* Extracted Content Preview */}
+                        {processedResults.extracted_content && (
+                          <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
+                            <h5 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                              <span className="text-teal-600">📋</span> Extracted Tables Preview (First 500 chars)
+                            </h5>
+                            <div className="bg-gray-50 rounded p-3">
+                              <pre className="text-xs text-gray-800 whitespace-pre-wrap font-mono">
+                                {typeof processedResults.extracted_content === 'string' 
+                                  ? processedResults.extracted_content.substring(0, 500) + (processedResults.extracted_content.length > 500 ? '...' : '')
+                                  : JSON.stringify(processedResults.extracted_content, null, 2).substring(0, 500) + '...'
+                                }
+                              </pre>
+                            </div>
+                            <p className="text-xs text-gray-500 mt-2">
+                              ℹ️ Download the CSV file to see complete extracted tables
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    
+                    {/* GLM ABAQUS Generator Results Display */}
+                    {processedResults.extraction_method === 'glm_abaqus_generator' && processedResults.status !== 'error' && (
+                      <div className="space-y-4">
+                        <div className="border rounded-lg p-4 bg-gradient-to-r from-purple-50 to-indigo-50 border-purple-200">
+                          <h4 className="text-sm font-semibold mb-2 text-purple-900 flex items-center gap-2">
+                            🔧 GLM ABAQUS Generator Complete
+                          </h4>
+                          
+                          {/* Extracted Dimensions */}
+                          {(processedResults.length || processedResults.diameter) && (
+                            <div className="mt-3 grid grid-cols-2 gap-3">
+                              {processedResults.length && (
+                                <div className="bg-white rounded p-2 border border-purple-200">
+                                  <div className="text-xs text-gray-600">Length</div>
+                                  <div className="text-sm font-semibold text-purple-900">{processedResults.length} mm</div>
+                                  <div className="text-xs text-purple-600">Scale: {processedResults.scale_factor_length?.toFixed(4)}</div>
+                                </div>
+                              )}
+                              {processedResults.diameter && (
+                                <div className="bg-white rounded p-2 border border-purple-200">
+                                  <div className="text-xs text-gray-600">Diameter</div>
+                                  <div className="text-sm font-semibold text-purple-900">{processedResults.diameter} mm</div>
+                                  <div className="text-xs text-purple-600">Scale: {processedResults.scale_factor_diameter?.toFixed(4)}</div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                          
+                          {/* Download Buttons */}
+                          <div className="mt-4 space-y-2">
+                            <button
+                              onClick={async () => {
+                                try {
+                                  const response = await ocrService.downloadProcessedFile(processedResults.taskId);
+                                  const blob = new Blob([response.data], { type: 'application/octet-stream' });
+                                  const url = window.URL.createObjectURL(blob);
+                                  const a = document.createElement('a');
+                                  a.href = url;
+                                  a.download = processedResults.output_file || 'Compression_modified.inp';
+                                  document.body.appendChild(a);
+                                  a.click();
+                                  window.URL.revokeObjectURL(url);
+                                  document.body.removeChild(a);
+                                  toast.success('ABAQUS input file downloaded!');
+                                } catch (error) {
+                                  toast.error('Failed to download ABAQUS file');
+                                }
+                              }}
+                              className="w-full text-sm px-4 py-2 rounded transition-colors flex items-center justify-center bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white"
+                            >
+                              <Download className="h-4 w-4 mr-2" />
+                              Download ABAQUS Input File (.inp)
+                            </button>
+                            
+                            {processedResults.csv_file && (
+                              <button
+                                onClick={async () => {
+                                  try {
+                                    const response = await fetch(`http://localhost:5001/api/download/${processedResults.csv_file}`, {
+                                      headers: {
+                                        'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+                                      }
+                                    });
+                                    const blob = await response.blob();
+                                    const url = window.URL.createObjectURL(blob);
+                                    const a = document.createElement('a');
+                                    a.href = url;
+                                    a.download = processedResults.csv_file;
+                                    document.body.appendChild(a);
+                                    a.click();
+                                    window.URL.revokeObjectURL(url);
+                                    document.body.removeChild(a);
+                                    toast.success('Stress-strain CSV downloaded!');
+                                  } catch (error) {
+                                    toast.error('Failed to download CSV file');
+                                  }
+                                }}
+                                className="w-full text-sm px-4 py-2 rounded transition-colors flex items-center justify-center bg-white border-2 border-purple-600 text-purple-600 hover:bg-purple-50"
+                              >
+                                <Download className="h-4 w-4 mr-2" />
+                                Download Stress-Strain Data (CSV)
+                              </button>
+                            )}
+                          </div>
+                          
+                          {processedResults.serial_number && (
+                            <div className="mt-3 text-xs text-purple-700">
+                              📝 Serial Number: {processedResults.serial_number}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* ABAQUS FEM Results Display */}
+                    {processedResults.extraction_method === 'abaqus_fem' && processedResults.status !== 'error' && (
+                      <div className="space-y-4">
+                        <div className="border rounded-lg p-4 bg-gradient-to-r from-emerald-50 to-teal-50 border-emerald-200">
+                          <h4 className="text-sm font-semibold mb-2 text-emerald-900 flex items-center gap-2">
+                            🔬 ABAQUS FEM Generation Complete
+                            <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">
+                              Serial: {processedResults.extracted_data?.serial_number}
+                            </span>
+                          </h4>
+                          
+                          {/* Download .inp file button */}
+                          <button
+                            onClick={async () => {
+                              try {
+                                const response = await ocrService.downloadInpFile(processedResults.taskId);
+                                const blob = new Blob([response.data], { type: 'text/plain' });
+                                const url = window.URL.createObjectURL(blob);
+                                const a = document.createElement('a');
+                                a.href = url;
+                                a.download = processedResults.output_filename || 'modified.inp';
+                                document.body.appendChild(a);
+                                a.click();
+                                window.URL.revokeObjectURL(url);
+                                document.body.removeChild(a);
+                                toast.success('ABAQUS .inp file downloaded!');
+                              } catch (error) {
+                                toast.error('Failed to download .inp file');
+                              }
+                            }}
+                            className="mt-2 w-full text-sm px-4 py-2 rounded transition-colors flex items-center justify-center bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white"
+                          >
+                            <Download className="h-4 w-4 mr-2" />
+                            Download ABAQUS .inp File
+                          </button>
+                        </div>
+                        
+                        {/* Extracted Dimensions */}
+                        {processedResults.extracted_data?.dimensions && (
+                          <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
+                            <h5 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                              <span className="text-emerald-600">📏</span> Extracted Dimensions
+                            </h5>
+                            <div className="grid grid-cols-3 gap-4">
+                              {Object.entries(processedResults.extracted_data.dimensions).map(([key, value]) => (
+                                <div key={key} className="bg-gray-50 rounded p-3">
+                                  <p className="text-xs text-gray-500 uppercase mb-1">{key}</p>
+                                  <p className="text-sm font-semibold text-gray-900">
+                                    {value !== null ? `${value} mm` : 'N/A'}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        
+                        {/* Extracted Stress-Strain Data */}
+                        {processedResults.extracted_data?.stress_strain && processedResults.extracted_data.stress_strain.length > 0 && (
+                          <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
+                            <h5 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                              <span className="text-emerald-600"></span> Stress-Strain Data ({processedResults.extracted_data.stress_strain.length} points)
+                            </h5>
+                            <div className="overflow-x-auto">
+                              <table className="min-w-full divide-y divide-gray-200">
+                                <thead className="bg-gray-50">
+                                  <tr>
+                                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Stress</th>
+                                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Strain</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="bg-white divide-y divide-gray-200">
+                                  {processedResults.extracted_data.stress_strain.slice(0, 10).map((point, idx) => (
+                                    <tr key={idx}>
+                                      <td className="px-3 py-2 text-xs text-gray-900">{point.stress}</td>
+                                      <td className="px-3 py-2 text-xs text-gray-900">{point.strain}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                              {processedResults.extracted_data.stress_strain.length > 10 && (
+                                <p className="text-xs text-gray-500 mt-2 text-center">
+                                  Showing first 10 of {processedResults.extracted_data.stress_strain.length} data points
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                        
+                        {/* No stress-strain data found */}
+                        {(!processedResults.extracted_data?.stress_strain || processedResults.extracted_data.stress_strain.length === 0) && (
+                          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                            <p className="text-xs text-yellow-800">
+                              No stress-strain data was found in the PDF. Using default strain value for .inp generation.
                             </p>
                           </div>
                         )}

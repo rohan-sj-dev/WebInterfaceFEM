@@ -154,11 +154,70 @@ export const ocrService = {
     });
   },
 
+  uploadFileAbaqusFEM: async (file, serialNumber) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('serial_number', serialNumber);
+
+    return await api.post('/upload_abaqus_fem', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+  },
+
+  uploadFileGLMTableExtraction: async (file, customPrompt = '') => {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (customPrompt) {
+      formData.append('custom_prompt', customPrompt);
+    }
+
+    return await api.post('/upload_glm_table_extraction', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+  },
+
+  uploadFileGLMAbaqusGenerator: async (file, serialNumber) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('serialNumber', serialNumber);
+
+    return await api.post('/upload_glm_abaqus_generator', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+  },
+
+  downloadInpFile: async (taskId) => {
+    const response = await axios.get(`${API_BASE_URL}/download_inp/${taskId}`, {
+      headers: {
+        Authorization: `Bearer ${localStorage.getItem('token')}`,
+      },
+      responseType: 'blob',
+    });
+    return response;
+  },
+
   getStatus: async (taskId) => {
     return await api.get(`/status/${taskId}`);
   },
 
   downloadFile: async (taskId) => {
+    const response = await axios.get(`${API_BASE_URL}/download/${taskId}`, {
+      headers: {
+        Authorization: `Bearer ${localStorage.getItem('token')}`,
+      },
+      responseType: 'blob',
+    });
+    return response;
+  },
+
+  // Alias for downloadFile - used by GLM table extraction
+  downloadProcessedFile: async (taskId) => {
     const response = await axios.get(`${API_BASE_URL}/download/${taskId}`, {
       headers: {
         Authorization: `Bearer ${localStorage.getItem('token')}`,

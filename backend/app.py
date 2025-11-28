@@ -10,6 +10,7 @@ import tempfile
 import threading
 import zipfile
 import subprocess
+import io
 from datetime import datetime, timedelta
 import logging
 import requests
@@ -19,6 +20,7 @@ from io import BytesIO
 import pikepdf
 import base64
 from openai import OpenAI
+from glm_vision_service import GLMVisionService
 
 
 # Load environment variables from .env file
@@ -40,6 +42,9 @@ LLMWHISPERER_API_KEY = os.getenv('LLMWHISPERER_API_KEY', '')
 
 # OPENAI CONFIGURATION
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
+
+# GLM CONFIGURATION
+GLM_API_KEY = os.getenv('GLM_API_KEY', '')
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -79,6 +84,9 @@ ALLOWED_EXTENSIONS = {'pdf'}
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
+
+# Task storage for tracking async processing
+task_storage = {}
 
 def setup_ocr_environment():
     os.environ['TESSERACT_CMD'] = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
@@ -2952,14 +2960,26 @@ def handle_general_exception(e):
 @jwt_required()
 def get_status(task_id):
     """Get processing status"""
-    user_id = int(get_jwt_identity())
+    user_id = get_jwt_identity()
+    # Convert to int for comparison (handles both string and int user_ids)
+    try:
+        user_id_int = int(user_id)
+    except (ValueError, TypeError):
+        user_id_int = user_id
     
     if task_id not in processing_status:
         return jsonify({'error': 'Task not found'}), 404
     
     status = processing_status[task_id]
 
-    if status.get('user_id') != user_id:
+    # Handle both string and int user_id comparisons
+    status_user_id = status.get('user_id')
+    try:
+        status_user_id_int = int(status_user_id)
+    except (ValueError, TypeError):
+        status_user_id_int = status_user_id
+    
+    if status_user_id_int != user_id_int and str(status_user_id) != str(user_id):
         return jsonify({'error': 'Unauthorized'}), 403
     
     return jsonify(status)
@@ -2967,14 +2987,26 @@ def get_status(task_id):
 @app.route('/api/download/<task_id>', methods=['GET'])
 @jwt_required()
 def download_file(task_id):
-    user_id = int(get_jwt_identity())
+    user_id = get_jwt_identity()
+    # Convert to int for comparison (handles both string and int user_ids)
+    try:
+        user_id_int = int(user_id)
+    except (ValueError, TypeError):
+        user_id_int = user_id
     
     if task_id not in processing_status:
         return jsonify({'error': 'Task not found'}), 404
     
     status = processing_status[task_id]
 
-    if status.get('user_id') != user_id:
+    # Handle both string and int user_id comparisons
+    status_user_id = status.get('user_id')
+    try:
+        status_user_id_int = int(status_user_id)
+    except (ValueError, TypeError):
+        status_user_id_int = status_user_id
+    
+    if status_user_id_int != user_id_int and str(status_user_id) != str(user_id):
         return jsonify({'error': 'Unauthorized'}), 403
     
     if status['status'] != 'completed':
@@ -3149,6 +3181,792 @@ def launch_abaqus():
             'success': False,
             'message': f'Error: {str(e)}'
         }), 500
+
+
+# ============================================================================
+# ABAQUS FEM INTEGRATION - Extract dimensions & stress-strain, modify .inp
+# ============================================================================
+
+def extract_dimensions_and_stress_strain(pdf_path, serial_number):
+    """
+    Extract dimensions from page 1 and stress-strain table from PDF based on serial number.
+    Uses GPT-4o Vision for intelligent extraction.
+    
+    Returns:
+    {
+        'dimensions': {'length': float, 'width': float, 'height': float},
+        'stress_strain': [{'stress': float, 'strain': float}, ...],
+        'serial_number': str
+    }
+    """
+    try:
+        import fitz  # PyMuPDF
+        
+        # Open PDF
+        doc = fitz.open(pdf_path)
+        
+        # Extract page 1 for dimensions
+        page1 = doc[0]
+        pix = page1.get_pixmap(dpi=150)
+        img_bytes = pix.tobytes("png")
+        page1_base64 = base64.b64encode(img_bytes).decode('utf-8')
+        
+        # Extract all pages for stress-strain table search
+        all_pages_base64 = []
+        for page_num in range(len(doc)):
+            page = doc[page_num]
+            pix = page.get_pixmap(dpi=150)
+            img_bytes = pix.tobytes("png")
+            all_pages_base64.append(base64.b64encode(img_bytes).decode('utf-8'))
+        
+        doc.close()
+        
+        # Initialize OpenAI client
+        client = OpenAI(api_key=OPENAI_API_KEY)
+        
+        # Query 1: Extract dimensions from page 1
+        dimensions_prompt = f"""
+        You are analyzing a technical document for serial number: {serial_number}
+        
+        This is a CYLINDRICAL SPECIMEN. Look for these specific dimensions:
+        - DIAMETER or D or d or Ø (in mm) - the circular cross-section diameter
+        - LENGTH or L or l or Height or H (in mm) - the cylinder length/height
+        
+        Common formats:
+        - "Diameter: 100 mm" → diameter = 100
+        - "D = 50mm" → diameter = 50
+        - "Length: 150 mm" → length = 150
+        - "L = 200mm" → length = 200
+        
+        Extract ONLY numeric values (without units).
+        
+        Return ONLY a JSON object in this exact format (no markdown, no code blocks):
+        {{"diameter": <number>, "length": <number>}}
+        
+        If a dimension is not found, use null.
+        Example: {{"diameter": 100, "length": 150}}
+        
+        DO NOT wrap in markdown code blocks. Return ONLY the raw JSON.
+        """
+        
+        dimensions_response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": dimensions_prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/png;base64,{page1_base64}"
+                            }
+                        }
+                    ]
+                }
+            ],
+            max_tokens=500
+        )
+        
+        dimensions_text = dimensions_response.choices[0].message.content.strip()
+        logger.info(f"Dimensions extraction RAW: {dimensions_text}")
+        
+        # Parse dimensions JSON (remove markdown code blocks if present)
+        import json
+        import re
+        
+        # Remove markdown code blocks (```json ... ``` or ``` ... ```)
+        clean_dimensions = re.sub(r'^```(?:json)?\s*|\s*```$', '', dimensions_text, flags=re.MULTILINE).strip()
+        logger.info(f"Dimensions extraction CLEANED: {clean_dimensions}")
+        dimensions = json.loads(clean_dimensions)
+        logger.info(f"Dimensions extraction PARSED: {dimensions}")
+
+        stress_strain_prompt = f"""
+        You are analyzing a technical document for serial number: {serial_number}
+        
+        Find and extract stress-strain data. Look for:
+        - Tables with "Stress" and "Strain" columns
+        - Graphs with stress-strain curves (read data points from graph)
+        - Listed data in format like "Stress: X, Strain: Y"
+        
+        Extract numeric values only (remove units if present).
+        
+        Return ONLY a JSON array in this exact format (no markdown, no code blocks):
+        [{{"stress": <number>, "strain": <number>}}, {{"stress": <number>, "strain": <number>}}]
+        
+        If no stress-strain data is found, return an empty array: []
+        
+        DO NOT wrap in markdown code blocks. Return ONLY the raw JSON array.
+        Important: Extract ALL data points you can find.
+        """
+        
+        # Use first 5 pages to search for stress-strain data
+        search_pages = all_pages_base64[:min(5, len(all_pages_base64))]
+        
+        content_list = [{"type": "text", "text": stress_strain_prompt}]
+        for idx, page_base64 in enumerate(search_pages):
+            content_list.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:image/png;base64,{page_base64}"}
+            })
+        
+        stress_strain_response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": content_list}],
+            max_tokens=2000
+        )
+        
+        stress_strain_text = stress_strain_response.choices[0].message.content.strip()
+        logger.info(f"Stress-strain extraction: {stress_strain_text[:200]}...")
+        
+        # Parse stress-strain JSON (remove markdown code blocks if present)
+        clean_stress_strain = re.sub(r'^```(?:json)?\s*|\s*```$', '', stress_strain_text, flags=re.MULTILINE).strip()
+        stress_strain_data = json.loads(clean_stress_strain)
+        
+        return {
+            'dimensions': dimensions,
+            'stress_strain': stress_strain_data,
+            'serial_number': serial_number
+        }
+        
+    except Exception as e:
+        logger.error(f"Error extracting data: {str(e)}")
+        raise
+
+
+def modify_abaqus_inp(base_inp_path, output_inp_path, dimensions, stress_strain_data):
+    """
+    Modify Abaqus .inp file with extracted dimensions and stress-strain data.
+    
+    For cylindrical specimens:
+    - X, Y coordinates represent the circular cross-section (diameter in XY plane)
+    - Z coordinate represents the cylinder height/length
+    
+    Parameters:
+    - base_inp_path: Path to base Compression.inp file
+    - output_inp_path: Path to save modified .inp file
+    - dimensions: Dict with 'diameter', 'length' keys
+    - stress_strain_data: List of {'stress': float, 'strain': float} dicts
+    """
+    try:
+        # Base Compression.inp dimensions (measured from coordinates)
+        # Max X,Y ≈ ±99.95 → radius ≈ 100mm → diameter = 100mm
+        # Max Z = 150mm → length = 150mm
+        base_diameter = 100.0
+        base_length = 150.0
+        
+        # Get new dimensions
+        new_diameter = dimensions.get('diameter')
+        new_length = dimensions.get('length')
+        
+        # Calculate scale factors for XY (diameter) and Z (length)
+        if new_diameter is None or not isinstance(new_diameter, (int, float)) or new_diameter <= 0:
+            logger.warning(f"Diameter not found or invalid ({new_diameter}), using base diameter {base_diameter}mm (XY scale factor 1.0)")
+            new_diameter = base_diameter
+            scale_xy = 1.0
+        else:
+            scale_xy = new_diameter / base_diameter
+            logger.info(f"Scaling diameter from {base_diameter}mm to {new_diameter}mm (XY scale factor: {scale_xy})")
+        
+        if new_length is None or not isinstance(new_length, (int, float)) or new_length <= 0:
+            logger.warning(f"Length not found or invalid ({new_length}), using base length {base_length}mm (Z scale factor 1.0)")
+            new_length = base_length
+            scale_z = 1.0
+        else:
+            scale_z = new_length / base_length
+            logger.info(f"Scaling length from {base_length}mm to {new_length}mm (Z scale factor: {scale_z})")
+        
+        # Calculate strain from stress-strain data
+        # Use the maximum strain value or average
+        if stress_strain_data and len(stress_strain_data) > 0:
+            # Get the strain at maximum stress
+            max_stress_point = max(stress_strain_data, key=lambda x: x.get('stress', 0))
+            strain_value = max_stress_point.get('strain', -0.3)
+        else:
+            strain_value = -0.3  # Default compression strain
+        
+        # Read base file
+        with open(base_inp_path, 'r') as f:
+            lines = f.readlines()
+        
+        modified_lines = []
+        in_node_section = False
+        original_length = None
+        
+        for line in lines:
+            # Check if we're entering the *Node section
+            if line.strip().startswith('*Node'):
+                in_node_section = True
+                modified_lines.append(line)
+                continue
+            
+            # Check if we're leaving the *Node section
+            if in_node_section and line.strip().startswith('*'):
+                in_node_section = False
+            
+            # Modify node coordinates if in *Node section
+            if in_node_section and not line.strip().startswith('*'):
+                parts = line.strip().split(',')
+                if len(parts) >= 4:
+                    try:
+                        node_id = parts[0].strip()
+                        # Scale X,Y by diameter ratio, Z by length ratio
+                        x = float(parts[1].strip()) * scale_xy
+                        y = float(parts[2].strip()) * scale_xy
+                        z = float(parts[3].strip()) * scale_z
+                        
+                        if original_length is None or z > original_length:
+                            original_length = z
+                        
+                        def format_coord(value):
+                            if abs(value) < 1e-10:
+                                return f"{'0.':>13}"
+                            else:
+                                formatted = f"{value:.7f}".rstrip('0')
+                                if '.' not in formatted:
+                                    formatted += '.'
+                                elif formatted.endswith('.'):
+                                    pass
+                                return f"{formatted:>13}"
+                        
+                        modified_line = f"{node_id:>7}, {format_coord(x)}, {format_coord(y)}, {format_coord(z)}\n"
+                        modified_lines.append(modified_line)
+                        continue
+                    except (ValueError, IndexError):
+                        pass
+            
+            # Modify boundary condition displacement
+            if line.strip().startswith('loading, 3, 3,') and strain_value != 0.0:
+                if original_length is not None:
+                    displacement = strain_value * original_length
+                    if displacement == int(displacement):
+                        modified_line = f"loading, 3, 3, {int(displacement)}.\n"
+                    else:
+                        modified_line = f"loading, 3, 3, {displacement}.\n"
+                    modified_lines.append(modified_line)
+                    logger.info(f"Modified displacement: {displacement} (strain: {strain_value}, length: {original_length})")
+                    continue
+            
+            # Keep all other lines unchanged
+            modified_lines.append(line)
+        
+        # Write modified file
+        with open(output_inp_path, 'w') as f:
+            f.writelines(modified_lines)
+        
+        logger.info(f"Modified .inp file saved: {output_inp_path}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error modifying .inp file: {str(e)}")
+        raise
+
+
+@app.route('/api/upload_abaqus_fem', methods=['POST'])
+@jwt_required()
+def upload_abaqus_fem():
+    """
+    Process PDF to extract dimensions and stress-strain data,
+    then generate modified Abaqus .inp file for download.
+    """
+    try:
+        current_user = get_jwt_identity()
+        logger.info(f"User {current_user} requested ABAQUS FEM processing")
+        
+        # Validate file upload
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file uploaded'}), 400
+        
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'error': 'Empty filename'}), 400
+        
+        # Get serial number from form
+        serial_number = request.form.get('serial_number', '').strip()
+        if not serial_number:
+            return jsonify({'error': 'Serial number is required'}), 400
+        
+        # Save uploaded PDF
+        filename = secure_filename(file.filename)
+        task_id = str(uuid.uuid4())
+        pdf_path = os.path.join(UPLOAD_FOLDER, f"{task_id}_{filename}")
+        file.save(pdf_path)
+        
+        # Base Compression.inp path
+        base_inp_path = os.path.join(os.path.dirname(__file__), 'Compression.inp')
+        if not os.path.exists(base_inp_path):
+            return jsonify({'error': 'Base Compression.inp file not found'}), 500
+        
+        # Output .inp path
+        output_filename = f"{serial_number}_modified.inp"
+        output_inp_path = os.path.join(OUTPUT_FOLDER, f"{task_id}_{output_filename}")
+        
+        # Process in background thread
+        task_status = {
+            'status': 'processing',
+            'message': 'Extracting dimensions and stress-strain data...',
+            'progress': 0,
+            'user_id': int(current_user),
+            'extraction_method': 'abaqus_fem'
+        }
+        
+        processing_status[task_id] = task_status
+        
+        def process_abaqus():
+            try:
+                # Step 1: Extract data from PDF
+                task_status['message'] = 'Analyzing PDF with GPT-4o Vision...'
+                task_status['progress'] = 20
+                
+                extracted_data = extract_dimensions_and_stress_strain(pdf_path, serial_number)
+                
+                task_status['message'] = 'Modifying Abaqus .inp file...'
+                task_status['progress'] = 60
+                
+                # Step 2: Modify .inp file
+                modify_abaqus_inp(
+                    base_inp_path,
+                    output_inp_path,
+                    extracted_data['dimensions'],
+                    extracted_data['stress_strain']
+                )
+                
+                task_status['status'] = 'completed'
+                task_status['message'] = 'Processing complete'
+                task_status['progress'] = 100
+                task_status['extracted_data'] = extracted_data
+                task_status['output_file'] = output_inp_path
+                task_status['output_filename'] = output_filename
+                
+                logger.info(f"ABAQUS FEM processing completed for task {task_id}")
+                
+            except Exception as e:
+                logger.error(f"Error in ABAQUS FEM processing: {str(e)}")
+                task_status['status'] = 'error'
+                task_status['message'] = f'Error: {str(e)}'
+                task_status['progress'] = 0
+        
+        thread = threading.Thread(target=process_abaqus)
+        thread.start()
+        
+        return jsonify({
+            'task_id': task_id,
+            'message': 'Processing started',
+            'serial_number': serial_number
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in upload_abaqus_fem: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/download_inp/<task_id>', methods=['GET'])
+@jwt_required()
+def download_inp_file(task_id):
+    """Download the generated .inp file"""
+    try:
+        user_id = int(get_jwt_identity())
+        
+        if task_id not in processing_status:
+            return jsonify({'error': 'Task not found'}), 404
+        
+        task_data = processing_status[task_id]
+        
+        if task_data.get('user_id') != user_id:
+            return jsonify({'error': 'Unauthorized'}), 403
+        
+        if task_data.get('status') != 'completed':
+            return jsonify({'error': 'Processing not completed'}), 400
+        
+        output_file = task_data.get('output_file')
+        output_filename = task_data.get('output_filename', 'modified.inp')
+        
+        if not output_file or not os.path.exists(output_file):
+            return jsonify({'error': 'Output file not found'}), 404
+        
+        return send_file(
+            output_file,
+            as_attachment=True,
+            download_name=output_filename,
+            mimetype='text/plain'
+        )
+        
+    except Exception as e:
+        logger.error(f"Error downloading .inp file: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/upload_glm_table_extraction', methods=['POST'])
+@jwt_required()
+def upload_glm_table_extraction():
+    """
+    Extract tables from PDF using GLM-4.5V Vision API
+    Converts PDF pages to images and sends to GLM for table extraction
+    Returns CSV format by default, supports custom prompts
+    """
+    try:
+        current_user = get_jwt_identity()
+        logger.info(f"User {current_user} requested GLM table extraction")
+        
+        # Validate file upload
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file uploaded'}), 400
+        
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'error': 'Empty filename'}), 400
+        
+        # Get custom prompt (optional)
+        custom_prompt = request.form.get('custom_prompt', '').strip() or None
+        
+        # Save uploaded PDF
+        filename = secure_filename(file.filename)
+        task_id = str(uuid.uuid4())
+        pdf_path = os.path.join(UPLOAD_FOLDER, f"{task_id}_{filename}")
+        file.save(pdf_path)
+        
+        # Task status
+        task_status = {
+            'status': 'processing',
+            'message': 'Converting PDF to images...',
+            'progress': 0,
+            'user_id': int(current_user),
+            'extraction_method': 'glm_table_extraction'
+        }
+        
+        processing_status[task_id] = task_status
+        
+        def process_glm_extraction():
+            try:
+                task_status['message'] = 'Converting PDF to images...'
+                task_status['progress'] = 20
+                
+                # Convert PDF to images using pdf2image (same as glmextract.py)
+                from pdf2image import convert_from_path
+                import base64
+                
+                images = convert_from_path(pdf_path)
+                page_count = len(images)
+                logger.info(f"Converted {page_count} PDF pages to images")
+                
+                task_status['message'] = 'Extracting tables with GLM-4.5V...'
+                task_status['progress'] = 40
+                
+                # Build content array with all images in sequence
+                content = []
+                
+                # Add all images first (in order)
+                for idx, img in enumerate(images):
+                    img_byte_arr = io.BytesIO()
+                    img.save(img_byte_arr, format='JPEG')
+                    base64_image = base64.b64encode(img_byte_arr.getvalue()).decode('utf-8')
+                    
+                    content.append({
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{base64_image}"
+                        }
+                    })
+                
+                # Add the text prompt
+                if custom_prompt:
+                    prompt_text = custom_prompt
+                else:
+                    prompt_text = "Extract all the tables from this series of images in their sequence and output it as CSV."
+                
+                content.append({
+                    "type": "text",
+                    "text": prompt_text
+                })
+                
+                # Send to GLM-4.5V
+                from zhipuai import ZhipuAI
+                client = ZhipuAI(api_key=GLM_API_KEY)
+                
+                response = client.chat.completions.create(
+                    model="glm-4.5v",
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": content
+                        }
+                    ],
+                    temperature=0.1,
+                    thinking={
+                        "type": "disabled"
+                    }
+                )
+                
+                extracted_content = response.choices[0].message.content
+                usage = {
+                    'prompt_tokens': response.usage.prompt_tokens,
+                    'completion_tokens': response.usage.completion_tokens,
+                    'total_tokens': response.usage.total_tokens
+                }
+                
+                task_status['progress'] = 80
+                task_status['message'] = 'Saving extracted tables...'
+                
+                # Save CSV output
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                csv_filename = f"tables_{timestamp}_{task_id[:8]}.csv"
+                csv_path = os.path.join(OUTPUT_FOLDER, csv_filename)
+                
+                with open(csv_path, 'w', encoding='utf-8') as f:
+                    f.write(extracted_content)
+                
+                # Save full output as text file too
+                txt_filename = f"tables_{timestamp}_{task_id[:8]}.txt"
+                txt_path = os.path.join(OUTPUT_FOLDER, txt_filename)
+                
+                with open(txt_path, 'w', encoding='utf-8') as f:
+                    f.write(extracted_content)
+                
+                logger.info(f"GLM table extraction completed: {csv_path}")
+                
+                task_status['status'] = 'completed'
+                task_status['message'] = 'Table extraction completed'
+                task_status['progress'] = 100
+                task_status['output_file'] = csv_filename
+                task_status['output_filename'] = csv_filename
+                task_status['txt_file'] = txt_filename
+                task_status['txt_filename'] = txt_filename
+                task_status['extracted_content'] = extracted_content
+                task_status['model_used'] = 'glm-4.5v'
+                task_status['token_usage'] = usage
+                task_status['tokens_used'] = usage.get('total_tokens', 0)
+                task_status['pages_processed'] = page_count
+                
+            except Exception as e:
+                logger.error(f"GLM table extraction error: {str(e)}", exc_info=True)
+                task_status['status'] = 'error'
+                task_status['message'] = f'Error: {str(e)}'
+        
+        # Start background processing
+        thread = threading.Thread(target=process_glm_extraction)
+        thread.daemon = True
+        thread.start()
+        
+        return jsonify({
+            'task_id': task_id,
+            'message': 'GLM table extraction started',
+            'status': 'processing'
+        }), 202
+        
+    except Exception as e:
+        logger.error(f"Error in GLM table extraction upload: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+# GLM ABAQUS Generator Endpoint
+# Add this to app.py before "if __name__ == '__main__':"
+
+@app.route('/api/upload_glm_abaqus_generator', methods=['POST'])
+@jwt_required()
+def upload_glm_abaqus_generator():
+    """
+    GLM-4.5V based ABAQUS input file generator
+    Extracts stress-strain data and dimensions for a specific serial number,
+    then generates modified ABAQUS .inp file
+    """
+    try:
+        user_id = get_jwt_identity()
+        
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file provided'}), 400
+        
+        file = request.files['file']
+        serial_number = request.form.get('serialNumber', '').strip()
+        
+        if not serial_number:
+            return jsonify({'error': 'Serial number is required'}), 400
+        
+        if file.filename == '':
+            return jsonify({'error': 'Empty filename'}), 400
+        
+        # Save uploaded PDF
+        filename = secure_filename(file.filename)
+        task_id = str(uuid.uuid4())
+        pdf_path = os.path.join(UPLOAD_FOLDER, f"{task_id}_{filename}")
+        file.save(pdf_path)
+        
+        logger.info(f"GLM ABAQUS generator started for serial: {serial_number}")
+        
+        # Initialize task status
+        task_status = {
+            'status': 'processing',
+            'message': 'Starting ABAQUS input generation...',
+            'progress': 10,
+            'user_id': user_id,
+            'serial_number': serial_number
+        }
+        
+        processing_status[task_id] = task_status
+        
+        def process_glm_abaqus():
+            try:
+                task_status['message'] = 'Converting PDF to images...'
+                task_status['progress'] = 20
+                
+                # Convert PDF to images
+                from pdf2image import convert_from_path
+                import base64
+                import re
+                
+                images = convert_from_path(pdf_path)
+                page_count = len(images)
+                logger.info(f"Converted {page_count} PDF pages to images")
+                
+                task_status['message'] = f'Extracting data for serial {serial_number}...'
+                task_status['progress'] = 30
+                
+                # Build content array with all images
+                content = []
+                for idx, img in enumerate(images):
+                    img_byte_arr = io.BytesIO()
+                    img.save(img_byte_arr, format='JPEG')
+                    base64_image = base64.b64encode(img_byte_arr.getvalue()).decode('utf-8')
+                    
+                    content.append({
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{base64_image}"
+                        }
+                    })
+                
+                # Add extraction prompt
+                prompt_text = f"""Extract the following information for specimen with serial number {serial_number}:
+
+1. Stress-Strain Data Table - Extract ALL stress and strain values in CSV format with headers: Sample ID, Stress, Strain
+2. Dimensions - Extract the Length (Len) and Diameter (Dia) in mm
+
+Output format:
+DIMENSIONS:
+Length: <value> mm
+Diameter: <value> mm
+
+STRESS_STRAIN_DATA:
+<CSV data with Sample ID, Stress, Strain headers>
+
+Extract only data for serial number {serial_number}. Be precise with numerical values."""
+                
+                content.append({
+                    "type": "text",
+                    "text": prompt_text
+                })
+                
+                # Send to GLM-4.5V
+                from zhipuai import ZhipuAI
+                client = ZhipuAI(api_key=GLM_API_KEY)
+                
+                task_status['progress'] = 50
+                
+                response = client.chat.completions.create(
+                    model="glm-4.5v",
+                    messages=[{
+                        "role": "user",
+                        "content": content
+                    }],
+                    temperature=0.1,
+                    thinking={"type": "disabled"}
+                )
+                
+                extracted_content = response.choices[0].message.content
+                logger.info(f"GLM extraction complete: {extracted_content[:500]}")
+                
+                task_status['progress'] = 60
+                task_status['message'] = 'Parsing extracted data...'
+                
+                # Parse dimensions
+                length_match = re.search(r'Length:\s*(\d+(?:\.\d+)?)', extracted_content)
+                diameter_match = re.search(r'Diameter:\s*(\d+(?:\.\d+)?)', extracted_content)
+                
+                if not length_match or not diameter_match:
+                    raise ValueError("Could not extract dimensions from PDF")
+                
+                length = float(length_match.group(1))
+                diameter = float(diameter_match.group(1))
+                
+                # Calculate scale factors
+                scale_factor_length = length / 100.0
+                scale_factor_diameter = diameter / 150.0
+                
+                logger.info(f"Dimensions: L={length}mm, D={diameter}mm, Scale: L={scale_factor_length}, D={scale_factor_diameter}")
+                
+                # Extract CSV data
+                csv_match = re.search(r'STRESS_STRAIN_DATA:\s*\n(.*?)(?:\n\n|$)', extracted_content, re.DOTALL)
+                if not csv_match:
+                    # Try alternate format
+                    csv_match = re.search(r'Sample ID,Stress,Strain\s*\n(.*?)(?:\n\n|$)', extracted_content, re.DOTALL)
+                
+                if not csv_match:
+                    raise ValueError("Could not extract stress-strain data")
+                
+                stress_strain_csv = csv_match.group(1).strip()
+                
+                # Save stress-strain data
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                csv_filename = f"stress_strain_{serial_number}_{timestamp}.csv"
+                csv_path = os.path.join(OUTPUT_FOLDER, csv_filename)
+                
+                with open(csv_path, 'w', encoding='utf-8') as f:
+                    f.write("Sample ID,Stress,Strain\n")
+                    f.write(stress_strain_csv)
+                
+                task_status['progress'] = 70
+                task_status['message'] = 'Generating ABAQUS input file...'
+                
+                # Run modify_abaqus_input.py
+                from modify_abaqus_input import modify_abaqus_file
+                
+                base_inp = "Compression.inp"
+                output_inp_filename = f"Compression_{serial_number}_{timestamp}.inp"
+                output_inp_path = os.path.join(OUTPUT_FOLDER, output_inp_filename)
+                
+                # Calculate strain (assume max strain from data or use -0.18 as default)
+                strain = -0.18  # Default compression strain
+                
+                modify_abaqus_file(
+                    base_inp,
+                    output_inp_path,
+                    scale_factor_d=scale_factor_diameter,
+                    scale_factor=scale_factor_length,
+                    strain=strain
+                )
+                
+                logger.info(f"ABAQUS file generated: {output_inp_path}")
+                
+                task_status['progress'] = 100
+                task_status['status'] = 'completed'
+                task_status['message'] = 'ABAQUS input file generated successfully'
+                task_status['output_file'] = output_inp_filename
+                task_status['csv_file'] = csv_filename
+                task_status['length'] = length
+                task_status['diameter'] = diameter
+                task_status['scale_factor_length'] = scale_factor_length
+                task_status['scale_factor_diameter'] = scale_factor_diameter
+                task_status['extracted_content'] = extracted_content
+                
+            except Exception as e:
+                logger.error(f"GLM ABAQUS generation error: {str(e)}", exc_info=True)
+                task_status['status'] = 'error'
+                task_status['message'] = f'Error: {str(e)}'
+        
+        # Start background processing
+        thread = threading.Thread(target=process_glm_abaqus)
+        thread.daemon = True
+        thread.start()
+        
+        return jsonify({
+            'task_id': task_id,
+            'message': 'ABAQUS generation started',
+            'status': 'processing'
+        }), 202
+        
+    except Exception as e:
+        logger.error(f"Error in GLM ABAQUS generator: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
 
 
 if __name__ == '__main__':
