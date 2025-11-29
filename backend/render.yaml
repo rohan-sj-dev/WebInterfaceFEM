@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: ocr-fem-backend
+    runtime: python
+    buildCommand: chmod +x render-build.sh && ./render-build.sh
+    startCommand: gunicorn --bind 0.0.0.0:$PORT --timeout 300 app:app
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: FLASK_ENV
+        value: production
+      - key: UNSTRACT_API_URL
+        sync: false
+      - key: UNSTRACT_API_KEY
+        sync: false
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: AWS_DEFAULT_REGION
+        value: us-east-1
+      - key: LLMWHISPERER_API_URL
+        value: https://llmwhisperer-api.us-central.unstract.com/api/v2
+      - key: LLMWHISPERER_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: GLM_API_KEY
+        sync: false
+    healthCheckPath: /api/system/abaqus-status

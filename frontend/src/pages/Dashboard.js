@@ -36,7 +36,25 @@ const Dashboard = () => {
   const [simStatus, setSimStatus] = useState(null);
   const [simTaskId, setSimTaskId] = useState(null);
   const [outputFiles, setOutputFiles] = useState(null);
+  const [abaqusAvailable, setAbaqusAvailable] = useState(false);
   const simPollRef = useRef(null);
+
+  // Check ABAQUS availability on mount
+  useEffect(() => {
+    const checkAbaqus = async () => {
+      try {
+        const response = await ocrService.checkAbaqusAvailability();
+        setAbaqusAvailable(response.abaqus_available);
+        if (!response.abaqus_available) {
+          console.log('ABAQUS not available:', response.message);
+        }
+      } catch (error) {
+        console.error('Failed to check ABAQUS availability:', error);
+        setAbaqusAvailable(false);
+      }
+    };
+    checkAbaqus();
+  }, []);
 
   // Run ABAQUS simulation
   const handleRunSimulation = async (taskId) => {
@@ -980,15 +998,27 @@ const Dashboard = () => {
                             <Download className="h-4 w-4 mr-2" />
                             Download Results (.txt)
                           </button>
-                          {/* Run Simulation Button */}
-                          <button
-                            onClick={() => handleRunSimulation(processedResults.taskId)}
-                            disabled={simRunning}
-                            className="mt-3 w-full text-sm px-4 py-2 rounded transition-colors flex items-center justify-center bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white"
-                          >
-                            <Play className="h-4 w-4 mr-2" />
-                            {simRunning ? 'Simulation Running...' : 'Run Abaqus Simulation'}
-                          </button>
+                          
+                          {/* Run Simulation Button - Only show if ABAQUS is available */}
+                          {abaqusAvailable ? (
+                            <button
+                              onClick={() => handleRunSimulation(processedResults.taskId)}
+                              disabled={simRunning}
+                              className="mt-3 w-full text-sm px-4 py-2 rounded transition-colors flex items-center justify-center bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              <Play className="h-4 w-4 mr-2" />
+                              {simRunning ? 'Simulation Running...' : 'Run Abaqus Simulation'}
+                            </button>
+                          ) : (
+                            <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                              <p className="text-xs text-blue-800">
+                                <strong>ℹ️ ABAQUS Not Available</strong>
+                              </p>
+                              <p className="text-xs text-blue-700 mt-1">
+                                Download the .inp file above and run ABAQUS locally on your machine
+                              </p>
+                            </div>
+                          )}
 
                           {/* Simulation Status & Log */}
                           {simStatus && (
@@ -1284,30 +1314,42 @@ const Dashboard = () => {
                               </button>
                             )}
                             
-                            <button
-                              onClick={() => handleRunSimulation(processedResults.taskId)}
-                              disabled={simRunning}
-                              className={`w-full text-sm px-4 py-2 rounded transition-colors flex items-center justify-center ${
-                                simRunning 
-                                  ? 'bg-gray-400 cursor-not-allowed' 
-                                  : 'bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700'
-                              } text-white`}
-                            >
-                              {simRunning ? (
-                                <>
-                                  <svg className="animate-spin h-4 w-4 mr-2" viewBox="0 0 24 24">
-                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                                  </svg>
-                                  Running Simulation...
-                                </>
-                              ) : (
-                                <>
-                                  <span className="mr-2">▶️</span>
-                                  Run ABAQUS Simulation
-                                </>
-                              )}
-                            </button>
+                            {/* Run Simulation Button - Only show if ABAQUS is available */}
+                            {abaqusAvailable ? (
+                              <button
+                                onClick={() => handleRunSimulation(processedResults.taskId)}
+                                disabled={simRunning}
+                                className={`w-full text-sm px-4 py-2 rounded transition-colors flex items-center justify-center ${
+                                  simRunning 
+                                    ? 'bg-gray-400 cursor-not-allowed' 
+                                    : 'bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700'
+                                } text-white`}
+                              >
+                                {simRunning ? (
+                                  <>
+                                    <svg className="animate-spin h-4 w-4 mr-2" viewBox="0 0 24 24">
+                                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                                    </svg>
+                                    Running Simulation...
+                                  </>
+                                ) : (
+                                  <>
+                                    <span className="mr-2">▶️</span>
+                                    Run ABAQUS Simulation
+                                  </>
+                                )}
+                              </button>
+                            ) : (
+                              <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                                <p className="text-xs text-amber-800 font-semibold">
+                                  ℹ️ ABAQUS Not Available on Server
+                                </p>
+                                <p className="text-xs text-amber-700 mt-1">
+                                  Download the .inp file above and run the simulation locally using ABAQUS on your machine
+                                </p>
+                              </div>
+                            )}
                           </div>
                           
                           {processedResults.serial_number && (

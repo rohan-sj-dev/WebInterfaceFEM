@@ -1,0 +1,22 @@
+# Outputs
+*.pyc
+__pycache__/
+*.db
+*.sqlite3
+outputs/
+uploads/
+hf_models_cache/
+abaqus_jobs/
+
+# Environment
+.env
+.venv/
+venv/
+env/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

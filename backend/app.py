@@ -49,13 +49,38 @@ GLM_API_KEY = os.getenv('GLM_API_KEY', '')
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Check if ABAQUS is available on this system
+def check_abaqus_availability():
+    """Check if ABAQUS is installed and accessible"""
+    try:
+        result = subprocess.run(
+            'abaqus information=all',
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        return result.returncode == 0
+    except Exception as e:
+        logger.info(f"ABAQUS not available: {str(e)}")
+        return False
+
+# Global flag for ABAQUS availability
+ABAQUS_AVAILABLE = check_abaqus_availability()
+if ABAQUS_AVAILABLE:
+    logger.info("✓ ABAQUS detected - Simulation features enabled")
+else:
+    logger.info("✗ ABAQUS not detected - Simulation features disabled (server mode)")
+
 app = Flask(__name__)
-app.config['JWT_SECRET_KEY'] = 'dDaysadadREfj@38u983293*#(&#*u8w'
+app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', 'dDaysadadREfj@38u983293*#(&#*u8w')
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=24)
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  
 
+# CORS configuration - allow frontend origins
+ALLOWED_ORIGINS = os.getenv('ALLOWED_ORIGINS', 'http://localhost:3000').split(',')
 jwt = JWTManager(app)
-CORS(app, origins=["http://localhost:3000"])
+CORS(app, origins=ALLOWED_ORIGINS)
 @jwt.expired_token_loader
 def expired_token_callback(jwt_header, jwt_payload):
     print(f"JWT expired token error")
@@ -2428,6 +2453,14 @@ Please analyze the document images above and provide a comprehensive answer to t
         }
         logger.error(f"GPT-4o Vision processing failed: {e}")
 
+@app.route('/api/system/abaqus-status', methods=['GET'])
+def get_abaqus_status():
+    """Check if ABAQUS is available on this system"""
+    return jsonify({
+        'abaqus_available': ABAQUS_AVAILABLE,
+        'message': 'ABAQUS simulation features enabled' if ABAQUS_AVAILABLE else 'ABAQUS not installed - Download .inp files and run locally'
+    }), 200
+
 @app.route('/api/register', methods=['POST'])
 def register():
     data = request.get_json()
@@ -4032,6 +4065,13 @@ def run_abaqus_simulation(task_id):
     Executes ABAQUS CLI command and streams output
     """
     try:
+        # Check if ABAQUS is available
+        if not ABAQUS_AVAILABLE:
+            return jsonify({
+                'error': 'ABAQUS not available on this server',
+                'message': 'Please download the .inp file and run ABAQUS locally on your machine'
+            }), 503  # Service Unavailable
+        
         # Convert user_id for authorization
         user_id = get_jwt_identity()
         try:
