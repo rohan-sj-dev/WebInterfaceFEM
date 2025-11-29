@@ -58,7 +58,8 @@ const Dashboard = () => {
       const pollSimulation = async () => {
         try {
           const statusResponse = await ocrService.getSimulationStatus(simId);
-          const data = statusResponse.data;
+          console.log('Status response:', statusResponse); // Debug log
+          const data = statusResponse.data || statusResponse;
           
           setSimLog(data.output || '');
           setSimStatus(data.status);
