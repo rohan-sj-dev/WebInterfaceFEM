@@ -61,6 +61,8 @@ const Dashboard = () => {
           const statusResponse = await ocrService.getSimulationStatus(simId);
           console.log('Status response:', statusResponse); // Debug log
           const data = statusResponse.data || statusResponse;
+          console.log('Simulation data:', data);
+          console.log('Output files:', data.output_files);
           
           setSimLog(data.output || '');
           setSimStatus(data.status);
@@ -980,7 +982,7 @@ const Dashboard = () => {
                           </button>
                           {/* Run Simulation Button */}
                           <button
-                            onClick={handleRunSimulation}
+                            onClick={() => handleRunSimulation(processedResults.taskId)}
                             disabled={simRunning}
                             className="mt-3 w-full text-sm px-4 py-2 rounded transition-colors flex items-center justify-center bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white"
                           >
@@ -1004,7 +1006,7 @@ const Dashboard = () => {
                           )}
                           
                           {/* Result Files Download Section */}
-                          {simStatus === 'completed' && outputFiles && (
+                          {simStatus === 'completed' && outputFiles && Object.keys(outputFiles).length > 0 && (
                             <div className="mt-4 border-t pt-3">
                               <h6 className="text-xs font-semibold mb-2 text-gray-700">
                                 📊 Download Simulation Results
@@ -1341,7 +1343,7 @@ const Dashboard = () => {
                               </div>
                               
                               {/* Result Files Download Section */}
-                              {simStatus === 'completed' && outputFiles && (
+                              {simStatus === 'completed' && outputFiles && Object.keys(outputFiles).length > 0 && (
                                 <div className="mt-4 border-t pt-4">
                                   <h5 className="text-sm font-semibold mb-3 flex items-center gap-2">
                                     <span className="text-emerald-600">📊</span>

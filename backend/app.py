@@ -4146,12 +4146,20 @@ def run_abaqus_simulation(task_id):
                     odb_file = os.path.join(inp_dir, f"{inp_name}.odb")
                     dat_file = os.path.join(inp_dir, f"{inp_name}.dat")
                     msg_file = os.path.join(inp_dir, f"{inp_name}.msg")
+                    sta_file = os.path.join(inp_dir, f"{inp_name}.sta")
                     
-                    sim_status['output_files'] = {
-                        'odb': odb_file if os.path.exists(odb_file) else None,
-                        'dat': dat_file if os.path.exists(dat_file) else None,
-                        'msg': msg_file if os.path.exists(msg_file) else None
-                    }
+                    output_files_dict = {}
+                    if os.path.exists(odb_file):
+                        output_files_dict['odb'] = odb_file
+                    if os.path.exists(dat_file):
+                        output_files_dict['dat'] = dat_file
+                    if os.path.exists(msg_file):
+                        output_files_dict['msg'] = msg_file
+                    if os.path.exists(sta_file):
+                        output_files_dict['sta'] = sta_file
+                    
+                    sim_status['output_files'] = output_files_dict
+                    logger.info(f"Output files found: {list(output_files_dict.keys())}")
                     
                     sim_status['output'].append("\n=== Simulation completed successfully ===\n")
                 else:
