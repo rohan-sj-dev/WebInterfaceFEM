@@ -220,6 +220,16 @@ export const ocrService = {
     return await api.get(`/simulation_status/${simTaskId}`);
   },
 
+  downloadResultFile: async (simTaskId, fileType) => {
+    const response = await axios.get(`${API_BASE_URL}/download_result/${simTaskId}/${fileType}`, {
+      headers: {
+        Authorization: `Bearer ${localStorage.getItem('token')}`,
+      },
+      responseType: 'blob',
+    });
+    return response;
+  },
+
   getStatus: async (taskId) => {
     return await api.get(`/status/${taskId}`);
   },

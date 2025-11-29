@@ -4225,6 +4225,52 @@ def get_simulation_status(sim_task_id):
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/download_result/<sim_task_id>/<file_type>', methods=['GET'])
+@jwt_required()
+def download_simulation_result(sim_task_id, file_type):
+    """Download ABAQUS simulation result files (.dat, .msg, .sta, etc.)"""
+    try:
+        user_id = get_jwt_identity()
+        try:
+            user_id_int = int(user_id)
+        except (ValueError, TypeError):
+            user_id_int = user_id
+        
+        if sim_task_id not in processing_status:
+            return jsonify({'error': 'Simulation task not found'}), 404
+        
+        sim_data = processing_status[sim_task_id]
+        
+        # Authorization check
+        status_user_id = sim_data.get('user_id')
+        try:
+            status_user_id_int = int(status_user_id)
+        except (ValueError, TypeError):
+            status_user_id_int = status_user_id
+        
+        if status_user_id_int != user_id_int and str(status_user_id) != str(user_id):
+            return jsonify({'error': 'Unauthorized'}), 403
+        
+        if sim_data.get('status') != 'completed':
+            return jsonify({'error': 'Simulation not completed'}), 400
+        
+        output_files = sim_data.get('output_files', {})
+        file_path = output_files.get(file_type)
+        
+        if not file_path or not os.path.exists(file_path):
+            return jsonify({'error': f'{file_type.upper()} file not found'}), 404
+        
+        return send_file(
+            file_path,
+            as_attachment=True,
+            download_name=os.path.basename(file_path)
+        )
+        
+    except Exception as e:
+        logger.error(f"Error downloading result file: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5001)

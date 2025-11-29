@@ -35,6 +35,7 @@ const Dashboard = () => {
   const [simLog, setSimLog] = useState('');
   const [simStatus, setSimStatus] = useState(null);
   const [simTaskId, setSimTaskId] = useState(null);
+  const [outputFiles, setOutputFiles] = useState(null);
   const simPollRef = useRef(null);
 
   // Run ABAQUS simulation
@@ -63,6 +64,7 @@ const Dashboard = () => {
           
           setSimLog(data.output || '');
           setSimStatus(data.status);
+          setOutputFiles(data.output_files || null);
           
           if (data.status === 'running') {
             simPollRef.current = setTimeout(pollSimulation, 2000);
@@ -87,6 +89,26 @@ const Dashboard = () => {
       setSimRunning(false);
       setSimStatus('error');
       toast.error(error.response?.data?.error || 'Failed to start simulation');
+    }
+  };
+
+  // Download simulation result file
+  const handleDownloadResultFile = async (fileType) => {
+    try {
+      const response = await ocrService.downloadResultFile(simTaskId, fileType);
+      const blob = new Blob([response.data]);
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `simulation_result.${fileType}`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      toast.success(`Downloaded ${fileType.toUpperCase()} file!`);
+    } catch (error) {
+      console.error('Download error:', error);
+      toast.error(`Failed to download ${fileType.toUpperCase()} file`);
     }
   };
 
@@ -981,6 +1003,53 @@ const Dashboard = () => {
                             </div>
                           )}
                           
+                          {/* Result Files Download Section */}
+                          {simStatus === 'completed' && outputFiles && (
+                            <div className="mt-4 border-t pt-3">
+                              <h6 className="text-xs font-semibold mb-2 text-gray-700">
+                                📊 Download Simulation Results
+                              </h6>
+                              <div className="grid grid-cols-2 gap-2">
+                                {outputFiles.dat && (
+                                  <button
+                                    onClick={() => handleDownloadResultFile('dat')}
+                                    className="text-xs px-3 py-2 rounded transition-colors flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white"
+                                  >
+                                    <Download className="h-3 w-3 mr-1" />
+                                    .dat
+                                  </button>
+                                )}
+                                {outputFiles.msg && (
+                                  <button
+                                    onClick={() => handleDownloadResultFile('msg')}
+                                    className="text-xs px-3 py-2 rounded transition-colors flex items-center justify-center bg-indigo-600 hover:bg-indigo-700 text-white"
+                                  >
+                                    <Download className="h-3 w-3 mr-1" />
+                                    .msg
+                                  </button>
+                                )}
+                                {outputFiles.odb && (
+                                  <button
+                                    onClick={() => handleDownloadResultFile('odb')}
+                                    className="text-xs px-3 py-2 rounded transition-colors flex items-center justify-center bg-purple-600 hover:bg-purple-700 text-white"
+                                  >
+                                    <Download className="h-3 w-3 mr-1" />
+                                    .odb
+                                  </button>
+                                )}
+                                {outputFiles.sta && (
+                                  <button
+                                    onClick={() => handleDownloadResultFile('sta')}
+                                    className="text-xs px-3 py-2 rounded transition-colors flex items-center justify-center bg-teal-600 hover:bg-teal-700 text-white"
+                                  >
+                                    <Download className="h-3 w-3 mr-1" />
+                                    .sta
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                          
                           {/* Processing info */}
                           {processedResults.pages_processed && (
                             <div className="mt-3 text-xs text-blue-700">
@@ -1270,6 +1339,57 @@ const Dashboard = () => {
                               <div className="bg-gray-900 text-green-400 p-3 rounded font-mono text-xs max-h-96 overflow-y-auto">
                                 <pre className="whitespace-pre-wrap">{simLog || 'Waiting for output...'}</pre>
                               </div>
+                              
+                              {/* Result Files Download Section */}
+                              {simStatus === 'completed' && outputFiles && (
+                                <div className="mt-4 border-t pt-4">
+                                  <h5 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                                    <span className="text-emerald-600">📊</span>
+                                    Download Simulation Results
+                                  </h5>
+                                  <div className="grid grid-cols-2 gap-3">
+                                    {outputFiles.dat && (
+                                      <button
+                                        onClick={() => handleDownloadResultFile('dat')}
+                                        className="text-sm px-4 py-2.5 rounded transition-colors flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white shadow-sm"
+                                      >
+                                        <Download className="h-4 w-4 mr-2" />
+                                        Data File (.dat)
+                                      </button>
+                                    )}
+                                    {outputFiles.msg && (
+                                      <button
+                                        onClick={() => handleDownloadResultFile('msg')}
+                                        className="text-sm px-4 py-2.5 rounded transition-colors flex items-center justify-center bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm"
+                                      >
+                                        <Download className="h-4 w-4 mr-2" />
+                                        Messages (.msg)
+                                      </button>
+                                    )}
+                                    {outputFiles.odb && (
+                                      <button
+                                        onClick={() => handleDownloadResultFile('odb')}
+                                        className="text-sm px-4 py-2.5 rounded transition-colors flex items-center justify-center bg-purple-600 hover:bg-purple-700 text-white shadow-sm"
+                                      >
+                                        <Download className="h-4 w-4 mr-2" />
+                                        Results DB (.odb)
+                                      </button>
+                                    )}
+                                    {outputFiles.sta && (
+                                      <button
+                                        onClick={() => handleDownloadResultFile('sta')}
+                                        className="text-sm px-4 py-2.5 rounded transition-colors flex items-center justify-center bg-teal-600 hover:bg-teal-700 text-white shadow-sm"
+                                      >
+                                        <Download className="h-4 w-4 mr-2" />
+                                        Status (.sta)
+                                      </button>
+                                    )}
+                                  </div>
+                                  <p className="text-xs text-gray-500 mt-3">
+                                    💡 <strong>Tip:</strong> The .dat file contains numerical results. The .odb file requires ABAQUS Viewer.
+                                  </p>
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>
