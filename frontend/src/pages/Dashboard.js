@@ -34,7 +34,63 @@ const Dashboard = () => {
   const [simRunning, setSimRunning] = useState(false);
   const [simLog, setSimLog] = useState('');
   const [simStatus, setSimStatus] = useState(null);
+  const [simTaskId, setSimTaskId] = useState(null);
   const simPollRef = useRef(null);
+
+  // Run ABAQUS simulation
+  const handleRunSimulation = async (taskId) => {
+    try {
+      setSimRunning(true);
+      setSimLog('Starting ABAQUS simulation...\n');
+      setSimStatus('running');
+      
+      const response = await ocrService.runAbaqusSimulation(taskId);
+      const simId = response.data.simulation_task_id;
+      setSimTaskId(simId);
+      
+      // Poll for simulation status
+      const pollSimulation = async () => {
+        try {
+          const statusResponse = await ocrService.getSimulationStatus(simId);
+          const data = statusResponse.data;
+          
+          setSimLog(data.output || '');
+          setSimStatus(data.status);
+          
+          if (data.status === 'running') {
+            simPollRef.current = setTimeout(pollSimulation, 2000);
+          } else if (data.status === 'completed') {
+            setSimRunning(false);
+            toast.success('ABAQUS simulation completed successfully!');
+          } else if (data.status === 'error') {
+            setSimRunning(false);
+            toast.error(data.message || 'Simulation failed');
+          }
+        } catch (error) {
+          console.error('Error polling simulation:', error);
+          setSimRunning(false);
+          setSimStatus('error');
+          toast.error('Failed to get simulation status');
+        }
+      };
+      
+      pollSimulation();
+    } catch (error) {
+      console.error('Error starting simulation:', error);
+      setSimRunning(false);
+      setSimStatus('error');
+      toast.error(error.response?.data?.error || 'Failed to start simulation');
+    }
+  };
+
+  // Cleanup simulation polling on unmount
+  useEffect(() => {
+    return () => {
+      if (simPollRef.current) {
+        clearTimeout(simPollRef.current);
+      }
+    };
+  }, []);
 
   // Helper function to parse CSV string into table data
   const parseCSV = (csvString) => {
@@ -249,40 +305,6 @@ const Dashboard = () => {
       }
     } catch (error) {
       toast.error(`Failed to launch ABAQUS: ${error.response?.data?.error || error.message}`);
-    }
-  };
-
-  const handleRunSimulation = async () => {
-    if (!processedResults) return;
-    setSimRunning(true);
-    setSimLog('');
-    setSimStatus('queued');
-
-    try {
-      await ocrService.runSimulation(processedResults.taskId);
-
-      // start polling for log/status
-      simPollRef.current = setInterval(async () => {
-        try {
-          const res = await ocrService.getSimulationLog(processedResults.taskId);
-          const data = res.data || res;
-          setSimLog(data.log || '');
-          const status = data.simulation?.status || data.status || null;
-          setSimStatus(status);
-
-          if (status === 'completed' || status === 'failed') {
-            clearInterval(simPollRef.current);
-            setSimRunning(false);
-          }
-        } catch (err) {
-          clearInterval(simPollRef.current);
-          setSimRunning(false);
-        }
-      }, 2000);
-
-    } catch (err) {
-      setSimRunning(false);
-      toast.error('Failed to start simulation');
     }
   };
 
@@ -1183,11 +1205,64 @@ const Dashboard = () => {
                                 Download Stress-Strain Data (CSV)
                               </button>
                             )}
+                            
+                            <button
+                              onClick={() => handleRunSimulation(processedResults.taskId)}
+                              disabled={simRunning}
+                              className={`w-full text-sm px-4 py-2 rounded transition-colors flex items-center justify-center ${
+                                simRunning 
+                                  ? 'bg-gray-400 cursor-not-allowed' 
+                                  : 'bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700'
+                              } text-white`}
+                            >
+                              {simRunning ? (
+                                <>
+                                  <svg className="animate-spin h-4 w-4 mr-2" viewBox="0 0 24 24">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                                  </svg>
+                                  Running Simulation...
+                                </>
+                              ) : (
+                                <>
+                                  <span className="mr-2">▶️</span>
+                                  Run ABAQUS Simulation
+                                </>
+                              )}
+                            </button>
                           </div>
                           
                           {processedResults.serial_number && (
                             <div className="mt-3 text-xs text-purple-700">
                               📝 Serial Number: {processedResults.serial_number}
+                            </div>
+                          )}
+                          
+                          {/* Simulation Output */}
+                          {(simLog || simStatus) && (
+                            <div className="mt-4 border-t pt-4">
+                              <h5 className="text-sm font-semibold mb-2 flex items-center gap-2">
+                                <span className="text-green-600">🖥️</span>
+                                ABAQUS Simulation Output
+                                {simStatus === 'running' && (
+                                  <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full animate-pulse">
+                                    Running...
+                                  </span>
+                                )}
+                                {simStatus === 'completed' && (
+                                  <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">
+                                    ✓ Completed
+                                  </span>
+                                )}
+                                {simStatus === 'error' && (
+                                  <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full">
+                                    ✗ Error
+                                  </span>
+                                )}
+                              </h5>
+                              <div className="bg-gray-900 text-green-400 p-3 rounded font-mono text-xs max-h-96 overflow-y-auto">
+                                <pre className="whitespace-pre-wrap">{simLog || 'Waiting for output...'}</pre>
+                              </div>
                             </div>
                           )}
                         </div>

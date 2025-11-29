@@ -18,8 +18,12 @@ def modify_abaqus_file(input_file, output_file, scale_factor_d, scale_factor=1.0
             csv_reader = csv.DictReader(csv_file)
             for row in csv_reader:
                 try:
-                    stress = float(row['Stress'])
-                    strain_val = float(row['Strain'])
+                    # Clean the strain value by removing GLM artifacts like <|end_of_box|>
+                    strain_str = str(row['Strain']).replace('<|end_of_box|>', '').strip()
+                    stress_str = str(row['Stress']).replace('<|end_of_box|>', '').strip()
+                    
+                    stress = float(stress_str)
+                    strain_val = float(strain_str)
                     stress_strain_data.append((stress, strain_val))
                 except (ValueError, KeyError):
                     continue

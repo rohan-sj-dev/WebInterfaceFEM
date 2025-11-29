@@ -212,6 +212,14 @@ export const ocrService = {
     return response;
   },
 
+  runAbaqusSimulation: async (taskId) => {
+    return await api.post(`/run_abaqus_simulation/${taskId}`);
+  },
+
+  getSimulationStatus: async (simTaskId) => {
+    return await api.get(`/simulation_status/${simTaskId}`);
+  },
+
   getStatus: async (taskId) => {
     return await api.get(`/status/${taskId}`);
   },

@@ -3850,7 +3850,8 @@ def upload_glm_abaqus_generator():
             'message': 'Starting ABAQUS input generation...',
             'progress': 10,
             'user_id': user_id,
-            'serial_number': serial_number
+            'serial_number': serial_number,
+            'extraction_method': 'glm_abaqus_generator'
         }
         
         processing_status[task_id] = task_status
@@ -3940,8 +3941,9 @@ Extract only data for serial number {serial_number}. Be precise with numerical v
                 diameter = float(diameter_match.group(1))
                 
                 # Calculate scale factors
+                # Template dimensions: Length=100mm, Diameter=100mm
                 scale_factor_length = length / 100.0
-                scale_factor_diameter = diameter / 150.0
+                scale_factor_diameter = diameter / 100.0
                 
                 logger.info(f"Dimensions: L={length}mm, D={diameter}mm, Scale: L={scale_factor_length}, D={scale_factor_diameter}")
                 
@@ -4018,6 +4020,195 @@ Extract only data for serial number {serial_number}. Be precise with numerical v
         
     except Exception as e:
         logger.error(f"Error in GLM ABAQUS generator: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/run_abaqus_simulation/<task_id>', methods=['POST'])
+@jwt_required()
+def run_abaqus_simulation(task_id):
+    """
+    Run ABAQUS simulation using the generated .inp file
+    Executes ABAQUS CLI command and streams output
+    """
+    try:
+        # Convert user_id for authorization
+        user_id = get_jwt_identity()
+        try:
+            user_id_int = int(user_id)
+        except (ValueError, TypeError):
+            user_id_int = user_id
+        
+        if task_id not in processing_status:
+            return jsonify({'error': 'Task not found'}), 404
+        
+        task_data = processing_status[task_id]
+        
+        # Authorization check
+        status_user_id = task_data.get('user_id')
+        try:
+            status_user_id_int = int(status_user_id)
+        except (ValueError, TypeError):
+            status_user_id_int = status_user_id
+        
+        if status_user_id_int != user_id_int and str(status_user_id) != str(user_id):
+            return jsonify({'error': 'Unauthorized'}), 403
+        
+        if task_data.get('status') != 'completed':
+            return jsonify({'error': 'Input file generation not completed'}), 400
+        
+        output_file = task_data.get('output_file')
+        if not output_file or not os.path.exists(output_file):
+            return jsonify({'error': 'Input file not found'}), 404
+        
+        # Create simulation task ID
+        sim_task_id = str(uuid.uuid4())
+        sim_status = {
+            'task_id': sim_task_id,
+            'user_id': user_id,
+            'status': 'running',
+            'message': 'Starting ABAQUS simulation...',
+            'progress': 0,
+            'output': [],
+            'inp_file': output_file
+        }
+        processing_status[sim_task_id] = sim_status
+        
+        def run_simulation():
+            try:
+                import subprocess
+                
+                # Get the directory and filename
+                inp_dir = os.path.dirname(output_file)
+                inp_name = os.path.splitext(os.path.basename(output_file))[0]
+                
+                sim_status['message'] = 'Executing ABAQUS command...'
+                sim_status['progress'] = 10
+                
+                # ABAQUS command: abaqus job=<jobname> input=<inputfile> interactive
+                # The command will look for abaqus in PATH
+                abaqus_cmd = [
+                    'abaqus',
+                    f'job={inp_name}',
+                    f'input={output_file}',
+                    'interactive',
+                    'ask_delete=OFF'
+                ]
+                
+                logger.info(f"Running ABAQUS: {' '.join(abaqus_cmd)}")
+                sim_status['output'].append(f"Command: {' '.join(abaqus_cmd)}\n")
+                
+                # Run ABAQUS process
+                process = subprocess.Popen(
+                    abaqus_cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    cwd=inp_dir,
+                    bufsize=1,
+                    universal_newlines=True
+                )
+                
+                sim_status['progress'] = 20
+                
+                # Stream output
+                for line in iter(process.stdout.readline, ''):
+                    if line:
+                        sim_status['output'].append(line)
+                        logger.info(f"ABAQUS: {line.strip()}")
+                        
+                        # Update progress based on output
+                        if 'Analysis complete' in line or 'completed successfully' in line.lower():
+                            sim_status['progress'] = 90
+                        elif 'Step' in line or 'Increment' in line:
+                            sim_status['progress'] = min(80, sim_status['progress'] + 5)
+                
+                process.wait()
+                
+                if process.returncode == 0:
+                    sim_status['status'] = 'completed'
+                    sim_status['message'] = 'Simulation completed successfully'
+                    sim_status['progress'] = 100
+                    
+                    # Look for output files
+                    odb_file = os.path.join(inp_dir, f"{inp_name}.odb")
+                    dat_file = os.path.join(inp_dir, f"{inp_name}.dat")
+                    msg_file = os.path.join(inp_dir, f"{inp_name}.msg")
+                    
+                    sim_status['output_files'] = {
+                        'odb': odb_file if os.path.exists(odb_file) else None,
+                        'dat': dat_file if os.path.exists(dat_file) else None,
+                        'msg': msg_file if os.path.exists(msg_file) else None
+                    }
+                    
+                    sim_status['output'].append("\n=== Simulation completed successfully ===\n")
+                else:
+                    sim_status['status'] = 'error'
+                    sim_status['message'] = f'Simulation failed with exit code {process.returncode}'
+                    sim_status['output'].append(f"\n=== Simulation failed with exit code {process.returncode} ===\n")
+                
+            except FileNotFoundError:
+                sim_status['status'] = 'error'
+                sim_status['message'] = 'ABAQUS not found. Please ensure ABAQUS is installed and in PATH.'
+                sim_status['output'].append("ERROR: ABAQUS executable not found in system PATH\n")
+                logger.error("ABAQUS executable not found")
+            except Exception as e:
+                sim_status['status'] = 'error'
+                sim_status['message'] = f'Simulation error: {str(e)}'
+                sim_status['output'].append(f"\nERROR: {str(e)}\n")
+                logger.error(f"ABAQUS simulation error: {str(e)}", exc_info=True)
+        
+        # Start simulation in background thread
+        thread = threading.Thread(target=run_simulation)
+        thread.daemon = True
+        thread.start()
+        
+        return jsonify({
+            'simulation_task_id': sim_task_id,
+            'message': 'ABAQUS simulation started',
+            'status': 'running'
+        }), 202
+        
+    except Exception as e:
+        logger.error(f"Error starting ABAQUS simulation: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/simulation_status/<sim_task_id>', methods=['GET'])
+@jwt_required()
+def get_simulation_status(sim_task_id):
+    """Get the status and output of a running ABAQUS simulation"""
+    try:
+        user_id = get_jwt_identity()
+        try:
+            user_id_int = int(user_id)
+        except (ValueError, TypeError):
+            user_id_int = user_id
+        
+        if sim_task_id not in processing_status:
+            return jsonify({'error': 'Simulation task not found'}), 404
+        
+        sim_data = processing_status[sim_task_id]
+        
+        # Authorization check
+        status_user_id = sim_data.get('user_id')
+        try:
+            status_user_id_int = int(status_user_id)
+        except (ValueError, TypeError):
+            status_user_id_int = status_user_id
+        
+        if status_user_id_int != user_id_int and str(status_user_id) != str(user_id):
+            return jsonify({'error': 'Unauthorized'}), 403
+        
+        return jsonify({
+            'status': sim_data.get('status'),
+            'message': sim_data.get('message'),
+            'progress': sim_data.get('progress', 0),
+            'output': ''.join(sim_data.get('output', [])),
+            'output_files': sim_data.get('output_files', {})
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error getting simulation status: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 
