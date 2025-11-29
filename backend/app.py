@@ -4126,10 +4126,14 @@ def run_abaqus_simulation(task_id):
                         logger.info(f"ABAQUS: {line.strip()}")
                         
                         # Update progress based on output
-                        if 'Analysis complete' in line or 'completed successfully' in line.lower():
+                        if 'COMPLETED' in line.upper() or 'completed successfully' in line.lower():
                             sim_status['progress'] = 90
+                        elif 'Begin Abaqus/Standard Analysis' in line:
+                            sim_status['progress'] = 40
+                        elif 'End Abaqus/Standard Analysis' in line:
+                            sim_status['progress'] = 80
                         elif 'Step' in line or 'Increment' in line:
-                            sim_status['progress'] = min(80, sim_status['progress'] + 5)
+                            sim_status['progress'] = min(75, sim_status['progress'] + 5)
                 
                 process.wait()
                 
