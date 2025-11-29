@@ -4040,6 +4040,7 @@ def run_abaqus_simulation(task_id):
             user_id_int = user_id
         
         if task_id not in processing_status:
+            logger.error(f"Task {task_id} not found in processing_status. Available tasks: {list(processing_status.keys())}")
             return jsonify({'error': 'Task not found'}), 404
         
         task_data = processing_status[task_id]
@@ -4094,19 +4095,13 @@ def run_abaqus_simulation(task_id):
                 sim_status['progress'] = 10
                 
                 # ABAQUS command: abaqus job=<jobname> input=<inputfile> interactive
-                # The command will look for abaqus in PATH
-                abaqus_cmd = [
-                    'abaqus',
-                    f'job={inp_name}',
-                    f'input={output_file}',
-                    'interactive',
-                    'ask_delete=OFF'
-                ]
+                # Use shell=True on Windows to access PATH commands properly
+                abaqus_cmd = f'abaqus job={inp_name} input="{output_file}" interactive ask_delete=OFF'
                 
-                logger.info(f"Running ABAQUS: {' '.join(abaqus_cmd)}")
-                sim_status['output'].append(f"Command: {' '.join(abaqus_cmd)}\n")
+                logger.info(f"Running ABAQUS: {abaqus_cmd}")
+                sim_status['output'].append(f"Command: {abaqus_cmd}\n")
                 
-                # Run ABAQUS process
+                # Run ABAQUS process with shell=True for Windows
                 process = subprocess.Popen(
                     abaqus_cmd,
                     stdout=subprocess.PIPE,
@@ -4114,7 +4109,8 @@ def run_abaqus_simulation(task_id):
                     text=True,
                     cwd=inp_dir,
                     bufsize=1,
-                    universal_newlines=True
+                    universal_newlines=True,
+                    shell=True
                 )
                 
                 sim_status['progress'] = 20
