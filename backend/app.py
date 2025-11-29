@@ -3995,6 +3995,7 @@ Extract only data for serial number {serial_number}. Be precise with numerical v
                 task_status['status'] = 'completed'
                 task_status['message'] = 'ABAQUS input file generated successfully'
                 task_status['output_file'] = output_inp_filename
+                task_status['output_file_path'] = output_inp_path  # Full path for simulation
                 task_status['csv_file'] = csv_filename
                 task_status['length'] = length
                 task_status['diameter'] = diameter
@@ -4056,7 +4057,15 @@ def run_abaqus_simulation(task_id):
         if task_data.get('status') != 'completed':
             return jsonify({'error': 'Input file generation not completed'}), 400
         
-        output_file = task_data.get('output_file')
+        # Get the full path to the .inp file
+        output_file = task_data.get('output_file_path')
+        
+        # Fallback: if output_file_path doesn't exist, construct from output_file
+        if not output_file:
+            output_filename = task_data.get('output_file')
+            if output_filename:
+                output_file = os.path.join(OUTPUT_FOLDER, output_filename)
+        
         if not output_file or not os.path.exists(output_file):
             return jsonify({'error': 'Input file not found'}), 404
         
