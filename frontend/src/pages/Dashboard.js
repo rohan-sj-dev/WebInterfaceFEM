@@ -45,7 +45,13 @@ const Dashboard = () => {
       setSimStatus('running');
       
       const response = await ocrService.runAbaqusSimulation(taskId);
-      const simId = response.data.simulation_task_id;
+      console.log('Simulation response:', response); // Debug log
+      const simId = response.data?.simulation_task_id || response.simulation_task_id;
+      
+      if (!simId) {
+        throw new Error('No simulation task ID received');
+      }
+      
       setSimTaskId(simId);
       
       // Poll for simulation status
