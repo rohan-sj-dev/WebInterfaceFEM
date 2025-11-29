@@ -4090,16 +4090,20 @@ def run_abaqus_simulation(task_id):
                 # Get the directory and filename
                 inp_dir = os.path.dirname(output_file)
                 inp_name = os.path.splitext(os.path.basename(output_file))[0]
+                inp_filename = os.path.basename(output_file)
                 
                 sim_status['message'] = 'Executing ABAQUS command...'
                 sim_status['progress'] = 10
                 
                 # ABAQUS command: abaqus job=<jobname> input=<inputfile> interactive
                 # Use shell=True on Windows to access PATH commands properly
-                abaqus_cmd = f'abaqus job={inp_name} input="{output_file}" interactive ask_delete=OFF'
+                # Since cwd is set to inp_dir, use only the filename for input
+                abaqus_cmd = f'abaqus job={inp_name} input="{inp_filename}" interactive ask_delete=OFF'
                 
                 logger.info(f"Running ABAQUS: {abaqus_cmd}")
+                logger.info(f"Working directory: {inp_dir}")
                 sim_status['output'].append(f"Command: {abaqus_cmd}\n")
+                sim_status['output'].append(f"Working directory: {inp_dir}\n")
                 
                 # Run ABAQUS process with shell=True for Windows
                 process = subprocess.Popen(
