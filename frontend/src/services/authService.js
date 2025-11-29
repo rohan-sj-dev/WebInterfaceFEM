@@ -202,6 +202,16 @@ export const ocrService = {
     return response;
   },
 
+  downloadCsvFile: async (taskId) => {
+    const response = await axios.get(`${API_BASE_URL}/download_csv/${taskId}`, {
+      headers: {
+        Authorization: `Bearer ${localStorage.getItem('token')}`,
+      },
+      responseType: 'blob',
+    });
+    return response;
+  },
+
   getStatus: async (taskId) => {
     return await api.get(`/status/${taskId}`);
   },

@@ -3596,6 +3596,58 @@ def download_inp_file(task_id):
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/download_csv/<task_id>', methods=['GET'])
+@jwt_required()
+def download_csv_file(task_id):
+    """Download the stress-strain CSV file from GLM ABAQUS generation"""
+    try:
+        # Convert user_id to int for comparison
+        user_id = get_jwt_identity()
+        try:
+            user_id_int = int(user_id)
+        except (ValueError, TypeError):
+            user_id_int = user_id
+        
+        if task_id not in processing_status:
+            return jsonify({'error': 'Task not found'}), 404
+        
+        task_data = processing_status[task_id]
+        
+        # Handle both string and int user_id comparisons
+        status_user_id = task_data.get('user_id')
+        try:
+            status_user_id_int = int(status_user_id)
+        except (ValueError, TypeError):
+            status_user_id_int = status_user_id
+        
+        if status_user_id_int != user_id_int and str(status_user_id) != str(user_id):
+            return jsonify({'error': 'Unauthorized'}), 403
+        
+        if task_data.get('status') != 'completed':
+            return jsonify({'error': 'Processing not completed'}), 400
+        
+        csv_filename = task_data.get('csv_file')
+        
+        if not csv_filename:
+            return jsonify({'error': 'No CSV file available for this task'}), 404
+        
+        csv_path = os.path.join(OUTPUT_FOLDER, csv_filename)
+        
+        if not os.path.exists(csv_path):
+            return jsonify({'error': 'CSV file not found'}), 404
+        
+        return send_file(
+            csv_path,
+            as_attachment=True,
+            download_name=csv_filename,
+            mimetype='text/csv'
+        )
+        
+    except Exception as e:
+        logger.error(f"Error downloading CSV file: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/upload_glm_table_extraction', methods=['POST'])
 @jwt_required()
 def upload_glm_table_extraction():
@@ -3931,7 +3983,8 @@ Extract only data for serial number {serial_number}. Be precise with numerical v
                     output_inp_path,
                     scale_factor_d=scale_factor_diameter,
                     scale_factor=scale_factor_length,
-                    strain=strain
+                    strain=strain,
+                    stress_strain_csv=csv_path
                 )
                 
                 logger.info(f"ABAQUS file generated: {output_inp_path}")

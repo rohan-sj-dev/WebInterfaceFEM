@@ -1162,12 +1162,8 @@ const Dashboard = () => {
                               <button
                                 onClick={async () => {
                                   try {
-                                    const response = await fetch(`http://localhost:5001/api/download/${processedResults.csv_file}`, {
-                                      headers: {
-                                        'Authorization': `Bearer ${localStorage.getItem('access_token')}`
-                                      }
-                                    });
-                                    const blob = await response.blob();
+                                    const response = await ocrService.downloadCsvFile(processedResults.taskId);
+                                    const blob = new Blob([response.data], { type: 'text/csv' });
                                     const url = window.URL.createObjectURL(blob);
                                     const a = document.createElement('a');
                                     a.href = url;
