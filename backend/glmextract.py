@@ -3,7 +3,7 @@ import io
 from zhipuai import ZhipuAI
 from pdf2image import convert_from_path # Requires poppler installed
 
-client = ZhipuAI(api_key="fa5787c10dc4422881dacccfaca3a4ed.nVMVqj2qPcM548FM")
+client = ZhipuAI(api_key="")
 
 def analyze_pdf_page_as_image(pdf_path):
     # 1. Convert ALL PDF pages to images
