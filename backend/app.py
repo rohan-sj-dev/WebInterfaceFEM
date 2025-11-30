@@ -3762,19 +3762,23 @@ def upload_glm_table_extraction():
                 from zhipuai import ZhipuAI
                 client = ZhipuAI(api_key=GLM_API_KEY)
                 
-                response = client.chat.completions.create(
-                    model="glm-4.5v",
-                    messages=[
+                # Build request params (thinking param only works with newer SDK locally)
+                request_params = {
+                    "model": "glm-4.5v",
+                    "messages": [
                         {
                             "role": "user",
                             "content": content
                         }
                     ],
-                    temperature=0.1,
-                    thinking={
-                        "type": "disabled"
-                    }
-                )
+                    "temperature": 0.1
+                }
+                
+                # Only add thinking param if not on Render (SDK version compatibility)
+                if not os.getenv('RENDER'):
+                    request_params["thinking"] = {"type": "disabled"}
+                
+                response = client.chat.completions.create(**request_params)
                 
                 extracted_content = response.choices[0].message.content
                 usage = {
@@ -3941,15 +3945,21 @@ Extract only data for serial number {serial_number}. Be precise with numerical v
                 
                 task_status['progress'] = 50
                 
-                response = client.chat.completions.create(
-                    model="glm-4.5v",
-                    messages=[{
+                # Build request params (thinking param only works with newer SDK locally)
+                request_params = {
+                    "model": "glm-4.5v",
+                    "messages": [{
                         "role": "user",
                         "content": content
                     }],
-                    temperature=0.1,
-                    thinking={"type": "disabled"}
-                )
+                    "temperature": 0.1
+                }
+                
+                # Only add thinking param if not on Render (SDK version compatibility)
+                if not os.getenv('RENDER'):
+                    request_params["thinking"] = {"type": "disabled"}
+                
+                response = client.chat.completions.create(**request_params)
                 
                 extracted_content = response.choices[0].message.content
                 logger.info(f"GLM extraction complete: {extracted_content[:500]}")
