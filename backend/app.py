@@ -4,7 +4,6 @@ from flask_jwt_extended import JWTManager, jwt_required, create_access_token, ge
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 import os
-import sqlite3
 import uuid
 import tempfile
 import threading
@@ -21,6 +20,7 @@ import pikepdf
 import base64
 from openai import OpenAI
 from glm_vision_service import GLMVisionService
+from database import get_db, init_db
 
 
 # Load environment variables from .env file
@@ -119,35 +119,7 @@ def setup_ocr_environment():
 
 setup_ocr_environment()
 
-def init_db():
-    conn = sqlite3.connect('users.db')
-    cursor = conn.cursor()
-    
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            email TEXT UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL,
-            full_name TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS processing_jobs (
-            id TEXT PRIMARY KEY,
-            user_id INTEGER NOT NULL,
-            filename TEXT NOT NULL,
-            status TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            completed_at TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users (id)
-        )
-    ''')
-    
-    conn.commit()
-    conn.close()
-
+# Initialize database on startup (supports both SQLite and PostgreSQL)
 init_db()
 
 processing_status = {}
@@ -156,27 +128,39 @@ def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 def get_user_by_email(email):
-    conn = sqlite3.connect('users.db')
-    cursor = conn.cursor()
-    cursor.execute('SELECT id, email, password_hash, full_name FROM users WHERE email = ?', (email,))
-    user = cursor.fetchone()
-    conn.close()
-    return user
+    with get_db() as conn:
+        cursor = conn.cursor()
+        placeholder = '%s' if conn.is_postgres else '?'
+        cursor.execute(f'SELECT * FROM users WHERE email = {placeholder}', (email,))
+        row = cursor.fetchone()
+        if row:
+            if hasattr(row, 'keys'):  # SQLite Row object
+                return dict(row)
+            else:  # PostgreSQL tuple
+                return {'id': row[0], 'email': row[1], 'password_hash': row[2], 'full_name': row[3]}
+        return None
 
 def create_user(email, password, full_name):
     try:
-        conn = sqlite3.connect('users.db')
-        cursor = conn.cursor()
         password_hash = generate_password_hash(password)
-        cursor.execute(
-            'INSERT INTO users (email, password_hash, full_name) VALUES (?, ?, ?)',
-            (email, password_hash, full_name)
-        )
-        user_id = cursor.lastrowid
-        conn.commit()
-        conn.close()
-        return user_id
-    except sqlite3.IntegrityError:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            if conn.is_postgres:
+                cursor.execute(
+                    'INSERT INTO users (email, password_hash, full_name) VALUES (%s, %s, %s) RETURNING id',
+                    (email, password_hash, full_name)
+                )
+                user_id = cursor.fetchone()[0]
+            else:  # SQLite
+                cursor.execute(
+                    'INSERT INTO users (email, password_hash, full_name) VALUES (?, ?, ?)',
+                    (email, password_hash, full_name)
+                )
+                user_id = cursor.lastrowid
+            conn.commit()
+            return user_id
+    except Exception as e:
+        logger.error(f"Error creating user: {e}")
         return None
 
 def process_pdf_with_ocr_and_camelot(input_path, output_path, options, task_id, user_id):

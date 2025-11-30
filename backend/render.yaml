@@ -11,6 +11,10 @@ services:
         generateValue: true
       - key: FLASK_ENV
         value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ocr-fem-db
+          property: connectionString
       - key: UNSTRACT_API_URL
         sync: false
       - key: UNSTRACT_API_KEY
@@ -30,3 +34,8 @@ services:
       - key: GLM_API_KEY
         sync: false
     healthCheckPath: /api/system/abaqus-status
+
+databases:
+  - name: ocr-fem-db
+    databaseName: ocr_fem
+    user: ocr_fem_user
