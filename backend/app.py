@@ -46,7 +46,12 @@ OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
 # GLM CONFIGURATION
 GLM_API_KEY = os.getenv('GLM_API_KEY', '')
 
-logging.basicConfig(level=logging.INFO)
+# Configure logging to show all INFO level logs
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(levelname)s:%(name)s:%(message)s',
+    handlers=[logging.StreamHandler()]
+)
 logger = logging.getLogger(__name__)
 
 # Check if ABAQUS is available on this system
