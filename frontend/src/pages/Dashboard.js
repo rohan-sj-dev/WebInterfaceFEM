@@ -243,6 +243,15 @@ const Dashboard = () => {
         // GLM ABAQUS Generator with Serial Number
         response = await ocrService.uploadFileGLMAbaqusGenerator(file, serialNumber);
         toast.success(`File uploaded! Generating ABAQUS file for ${serialNumber}...`);
+      } else if (extractionMethod === 'glm_custom_query') {
+        // GLM Custom Query Extraction
+        if (!customPrompts || customPrompts.trim() === '') {
+          toast.error('Please provide a custom query for GLM extraction');
+          setProcessing(false);
+          return;
+        }
+        response = await ocrService.uploadFileGLMCustomQuery(file, customPrompts);
+        toast.success('File uploaded! Extracting data with GLM-4.5V...');
       } else if (extractionMethod === 'direct_llm') {
         // Direct LLM calling (GPT-4o/Claude)
         response = await ocrService.uploadFileDirectLLM(file, customPrompts, selectedModel);
@@ -321,6 +330,8 @@ const Dashboard = () => {
         a.download = type === 'all' ? 'OCR_Results.zip' : 'searchable_document_ocrmypdf.pdf';
       } else if (processedResults.extraction_method === 'convertapi_ocr') {
         a.download = type === 'all' ? 'OCR_Results.zip' : 'searchable_document_convertapi.pdf';
+      } else if (processedResults.extraction_method === 'glm_custom_query') {
+        a.download = type === 'all' ? 'OCR_Results.zip' : 'glm_query_result.txt';
       } else {
         a.download = type === 'all' ? 'OCR_Results.zip' : 'searchable_document.pdf';
       }
@@ -620,6 +631,21 @@ const Dashboard = () => {
                         <p className="text-xs text-gray-500">Extract stress-strain data & dimensions by serial number, generate .inp file</p>
                       </div>
                     </label>
+                    
+                    <label className="flex items-start cursor-pointer">
+                      <input
+                        type="radio"
+                        name="extractionMethod"
+                        value="glm_custom_query"
+                        checked={extractionMethod === 'glm_custom_query'}
+                        onChange={(e) => setExtractionMethod(e.target.value)}
+                        className="h-4 w-4 mt-0.5 text-primary-600 border-gray-300 focus:ring-primary-500"
+                      />
+                      <div className="ml-3">
+                        <span className="text-sm font-medium text-gray-900">GLM Custom Query Extraction</span>
+                        <p className="text-xs text-gray-500">Extract specific data using custom queries with GLM-4.5V vision AI</p>
+                      </div>
+                    </label>
                   </div>
                 </div>
                 
@@ -644,8 +670,8 @@ const Dashboard = () => {
                   </div>
                 )}
                 
-                {/* Query/Prompt Input - Show for Unstract, Textract, GPT-4o Vision, GPT-4o Hybrid, or GLM Table Extraction */}
-                {(extractionMethod === 'unstract' || extractionMethod === 'direct_llm' || extractionMethod === 'gpt4o_vision' || extractionMethod === 'gpt4o_hybrid' || extractionMethod === 'glm_table_extraction') && (
+                {/* Query/Prompt Input - Show for Unstract, Textract, GPT-4o Vision, GPT-4o Hybrid, GLM Table Extraction, or GLM Custom Query */}
+                {(extractionMethod === 'unstract' || extractionMethod === 'direct_llm' || extractionMethod === 'gpt4o_vision' || extractionMethod === 'gpt4o_hybrid' || extractionMethod === 'glm_table_extraction' || extractionMethod === 'glm_custom_query') && (
                   <div className="space-y-4">
                     {/* Model Selection - Only for Unstract */}
                     {extractionMethod === 'unstract' && (
@@ -1241,6 +1267,53 @@ const Dashboard = () => {
                             <p className="text-xs text-gray-500 mt-2">
                               ℹ️ Download the CSV file to see complete extracted tables
                             </p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    
+                    {/* GLM Custom Query Results Display */}
+                    {processedResults.extraction_method === 'glm_custom_query' && processedResults.status !== 'error' && (
+                      <div className="space-y-4">
+                        <div className="border rounded-lg p-4 bg-gradient-to-r from-green-50 to-emerald-50 border-green-200">
+                          <h4 className="text-sm font-semibold mb-2 text-green-900 flex items-center gap-2">
+                            🔍 GLM-4.5V Custom Query Extraction Complete
+                          </h4>
+                          
+                          {/* Display the query */}
+                          {processedResults.result && processedResults.result.query && (
+                            <div className="mt-3 bg-white border border-green-200 rounded p-3">
+                              <p className="text-xs font-semibold text-gray-700 mb-1">📝 Your Query:</p>
+                              <p className="text-xs text-gray-800 italic">"{processedResults.result.query}"</p>
+                            </div>
+                          )}
+                          
+                          {/* Download button */}
+                          <button
+                            onClick={() => handleDownload('pdf')}
+                            className="mt-3 w-full text-sm px-4 py-2 rounded transition-colors flex items-center justify-center bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white"
+                          >
+                            <Download className="h-4 w-4 mr-2" />
+                            Download Results (.txt)
+                          </button>
+                        </div>
+                        
+                        {/* Extracted Text Display */}
+                        {processedResults.result && processedResults.result.extracted_text && (
+                          <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
+                            <h5 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                              <span className="text-green-600">💬</span> Extracted Information
+                            </h5>
+                            <div className="bg-gray-50 rounded p-4 max-h-96 overflow-y-auto">
+                              <pre className="text-sm text-gray-800 whitespace-pre-wrap font-sans leading-relaxed">
+                                {processedResults.result.extracted_text}
+                              </pre>
+                            </div>
+                            <div className="mt-3 flex items-center gap-2 text-xs text-gray-500">
+                              <span>✨ Powered by GLM-4.5V Vision AI</span>
+                              <span>•</span>
+                              <span>📄 {processedResults.result.extracted_text.length} characters</span>
+                            </div>
                           </div>
                         )}
                       </div>

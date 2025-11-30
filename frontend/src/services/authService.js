@@ -205,7 +205,7 @@ export const ocrService = {
   uploadFileGLMAbaqusGenerator: async (file, serialNumber) => {
     const formData = new FormData();
     formData.append('file', file);
-    formData.append('serialNumber', serialNumber);
+    formData.append('serial_number', serialNumber);
 
     return await api.post('/upload_glm_abaqus_generator', formData, {
       headers: {
@@ -214,7 +214,19 @@ export const ocrService = {
     });
   },
 
-  downloadInpFile: async (taskId) => {
+  uploadFileGLMCustomQuery: async (file, customQuery) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('custom_query', customQuery);
+
+    return await api.post('/upload_glm_custom_query', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+  },
+
+  getStatus: async (taskId) => {
     const response = await axios.get(`${API_BASE_URL}/download_inp/${taskId}`, {
       headers: {
         Authorization: `Bearer ${localStorage.getItem('token')}`,

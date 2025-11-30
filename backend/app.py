@@ -2707,6 +2707,95 @@ print("DEBUG: After upload_file_textract function, about to register searchable 
 # Register searchable PDF route
 print("DEBUG: Registering searchable PDF route...")
 
+def process_pdf_with_glm_custom_query(input_path, task_id, user_id, custom_query):
+    """Process PDF with GLM-4.5V for custom query extraction"""
+    try:
+        processing_status[task_id] = {
+            'status': 'processing',
+            'message': 'Extracting custom query data with GLM-4.5V...',
+            'progress': 10,
+            'user_id': user_id
+        }
+        
+        # Initialize GLM service
+        glm_service = GLMVisionService(api_key=GLM_API_KEY)
+        
+        processing_status[task_id]['message'] = 'Uploading PDF to GLM-4.5V...'
+        processing_status[task_id]['progress'] = 30
+        
+        # Extract custom query data from PDF
+        result = glm_service.extract_tables_from_pdf(
+            pdf_path=input_path,
+            custom_prompt=custom_query,
+            model="glm-4.5v",
+            return_format="csv"  # Use csv format for better text output
+        )
+        
+        if not result.get('success'):
+            raise Exception(result.get('error', 'GLM extraction failed'))
+        
+        processing_status[task_id]['message'] = 'Processing GLM response...'
+        processing_status[task_id]['progress'] = 70
+        
+        # Save the result as text file
+        base_name = os.path.splitext(os.path.basename(input_path))[0]
+        output_filename = f"{base_name}_glm_query_result.txt"
+        output_path = os.path.join(OUTPUT_FOLDER, output_filename)
+        
+        # Extract the response text
+        extracted_text = result.get('content', '')
+        
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write(f"Query: {custom_query}\n\n")
+            f.write("=" * 80 + "\n\n")
+            f.write(extracted_text)
+        
+        processing_status[task_id]['message'] = 'GLM custom query extraction completed!'
+        processing_status[task_id]['progress'] = 90
+        
+        # Update database
+        conn = sqlite3.connect('users.db')
+        cursor = conn.cursor()
+        cursor.execute(
+            'UPDATE processing_jobs SET status = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?',
+            ('completed', task_id)
+        )
+        conn.commit()
+        conn.close()
+        
+        processing_status[task_id] = {
+            'status': 'completed',
+            'message': 'GLM custom query extraction completed',
+            'progress': 100,
+            'extraction_method': 'glm_custom_query',
+            'result': {
+                'output_file': output_filename,
+                'query': custom_query,
+                'extracted_text': extracted_text
+            },
+            'user_id': user_id
+        }
+        
+        logger.info(f"GLM custom query extraction completed for task {task_id}")
+        
+    except Exception as e:
+        logger.error(f"GLM custom query extraction failed for task {task_id}: {str(e)}")
+        processing_status[task_id] = {
+            'status': 'failed',
+            'message': f'GLM custom query extraction failed: {str(e)}',
+            'progress': 0,
+            'user_id': user_id
+        }
+        
+        conn = sqlite3.connect('users.db')
+        cursor = conn.cursor()
+        cursor.execute(
+            'UPDATE processing_jobs SET status = ? WHERE id = ?',
+            ('failed', task_id)
+        )
+        conn.commit()
+        conn.close()
+
 def convert_pdf_to_searchable_ocrmypdf(input_path, task_id, user_id):
     """Convert PDF to searchable using OCRmyPDF (local, fast)"""
     try:
@@ -2900,6 +2989,73 @@ def convert_pdf_to_searchable_convertapi(input_path, task_id, user_id):
         )
         conn.commit()
         conn.close()
+
+@app.route('/api/upload_glm_custom_query', methods=['POST'])
+@jwt_required()
+def upload_file_glm_custom_query():
+    """Upload PDF for GLM-4.5V custom query extraction"""
+    print("=== GLM CUSTOM QUERY UPLOAD ENDPOINT CALLED ===")
+    
+    user_id = int(get_jwt_identity())
+    print(f"JWT validation successful, user_id: {user_id}")
+    
+    # Check if GLM API is configured
+    if not GLM_API_KEY:
+        return jsonify({'error': 'GLM API is not configured. Please add GLM_API_KEY to environment variables.'}), 500
+    
+    if 'file' not in request.files:
+        print("Error: No file provided")
+        return jsonify({'error': 'No file provided'}), 400
+    
+    file = request.files['file']
+    print(f"File received: {file.filename}")
+    
+    if file.filename == '' or not allowed_file(file.filename):
+        print(f"Error: Invalid file type or empty filename: {file.filename}")
+        return jsonify({'error': 'Invalid file type. Please upload a PDF file.'}), 400
+    
+    # Get custom query
+    custom_query = request.form.get('custom_query', '')
+    if not custom_query or custom_query.strip() == '':
+        return jsonify({'error': 'Custom query is required for GLM extraction'}), 400
+    
+    print(f"Custom query received: {custom_query}")
+    
+    task_id = str(uuid.uuid4())
+    filename = secure_filename(file.filename)
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    input_filename = f"{timestamp}_{filename}"
+    input_path = os.path.join(UPLOAD_FOLDER, input_filename)
+    file.save(input_path)
+
+    conn = sqlite3.connect('users.db')
+    cursor = conn.cursor()
+    cursor.execute(
+        'INSERT INTO processing_jobs (id, user_id, filename, status, created_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)',
+        (task_id, user_id, filename, 'processing')
+    )
+    conn.commit()
+    conn.close()
+
+    processing_status[task_id] = {
+        'status': 'queued',
+        'message': 'File uploaded, queued for GLM custom query extraction',
+        'progress': 0,
+        'user_id': user_id
+    }
+
+    thread = threading.Thread(
+        target=process_pdf_with_glm_custom_query,
+        args=(input_path, task_id, user_id, custom_query)
+    )
+    thread.start()
+    
+    print(f"GLM custom query extraction started for task_id: {task_id}")
+    return jsonify({
+        'task_id': task_id,
+        'message': 'File uploaded successfully, extracting data with GLM-4.5V',
+        'filename': filename
+    })
 
 @app.route('/api/upload_ocrmypdf', methods=['POST'])
 @jwt_required()

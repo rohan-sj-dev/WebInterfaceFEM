@@ -58,54 +58,60 @@ class GLMVisionService:
         model: str = "glm-4.5v",
         return_format: str = "csv"
     ) -> Dict:
-        """Extract tables directly from PDF file using ZhipuAI SDK"""
+        """Extract tables directly from PDF file using ZhipuAI SDK by converting to images"""
         if not self.api_key:
             raise ValueError("GLM API key not configured")
         
         try:
-            # Step 1: Upload PDF file for vision analysis (not retrieval)
-            logger.info(f"Uploading PDF file: {pdf_path}")
-            with open(pdf_path, 'rb') as f:
-                file_object = self.client.files.create(
-                    file=f,
-                    purpose="file-extract"  # Use file-extract for vision models, not retrieval
-                )
+            # Import pdf2image for converting PDF to images
+            from pdf2image import convert_from_path
             
-            file_id = file_object.id
-            logger.info(f"PDF uploaded successfully. File ID: {file_id}")
+            # Step 1: Convert PDF pages to images
+            logger.info(f"Converting PDF to images: {pdf_path}")
+            images = convert_from_path(pdf_path)
             
-            # Step 2: Prepare prompt
+            if not images:
+                return {
+                    'success': False,
+                    'error': 'Empty PDF or conversion failed'
+                }
+            
+            logger.info(f"Processing {len(images)} pages...")
+            
+            # Step 2: Build content array with all images in sequence
+            content = []
+            
+            # Add all images first (in order)
+            for idx, img in enumerate(images):
+                img_byte_arr = io.BytesIO()
+                img.save(img_byte_arr, format='JPEG')
+                base64_image = base64.b64encode(img_byte_arr.getvalue()).decode('utf-8')
+                
+                content.append({
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{base64_image}"
+                    }
+                })
+                logger.info(f"Added page {idx + 1}/{len(images)}")
+            
+            # Step 3: Prepare prompt
             if custom_prompt:
                 prompt_text = custom_prompt
             else:
                 if return_format == "csv":
-                    prompt_text = """Extract ALL tables from the PDF document.
-
-For each table:
-1. Identify the table structure (headers and rows)
-2. Extract all data accurately
-3. Return the data in CSV format
-
-Requirements:
-- Preserve the exact values from the table
-- Maintain proper column alignment
-- Use commas as separators
-- If multiple tables exist, separate them with a blank line
-
-Return ONLY the CSV data, no additional explanation."""
+                    prompt_text = "Extract all the tables from this series of images in their sequence and output it as CSV."
                 else:
-                    prompt_text = """Extract ALL tables from the PDF document.
-
-Return the data as a JSON array where each element represents a table.
-
-Requirements:
-- Extract all tables found
-- Preserve exact values
-- Maintain proper structure
-- Return ONLY valid JSON, no additional text"""
+                    prompt_text = "Extract all the tables from this series of images in their sequence and output it as JSON array."
             
-            # Step 3: Create chat completion with uploaded file
-            logger.info(f"Calling GLM-4.5V API for table extraction")
+            # Add the text prompt at the end
+            content.append({
+                "type": "text",
+                "text": prompt_text
+            })
+            
+            # Step 4: Create chat completion with all images
+            logger.info(f"Sending to GLM-4.5V...")
             start_time = time.time()
             
             response = self.client.chat.completions.create(
@@ -113,20 +119,13 @@ Requirements:
                 messages=[
                     {
                         "role": "user",
-                        "content": [
-                            {
-                                "type": "file",
-                                "file": {"file_id": file_id}  # Try nested file object
-                            },
-                            {
-                                "type": "text",
-                                "text": prompt_text
-                            }
-                        ]
+                        "content": content
                     }
                 ],
                 temperature=0.1,
-                max_tokens=16384
+                thinking={
+                    "type": "disabled"
+                }
             )
             
             elapsed = time.time() - start_time
@@ -147,8 +146,7 @@ Requirements:
                 'content': extracted_content,
                 'format': return_format,
                 'model': model,
-                'usage': usage,
-                'file_id': file_id
+                'usage': usage
             }
             
         except Exception as e:
