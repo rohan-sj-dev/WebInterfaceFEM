@@ -130,6 +130,28 @@ export const ocrService = {
     });
   },
 
+  uploadFileOCRmyPDF: async (file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    return await api.post('/upload_ocrmypdf', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+  },
+
+  uploadFileConvertAPIocr: async (file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    return await api.post('/upload_convertapi_ocr', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+  },
+
   uploadFileGPT4oVision: async (file, customPrompts) => {
     const formData = new FormData();
     formData.append('file', file);

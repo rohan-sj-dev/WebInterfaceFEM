@@ -21,6 +21,8 @@ import pikepdf
 import base64
 from openai import OpenAI
 from glm_vision_service import GLMVisionService
+import convertapi
+import ocrmypdf
 
 
 # Load environment variables from .env file
@@ -45,6 +47,11 @@ OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
 
 # GLM CONFIGURATION
 GLM_API_KEY = os.getenv('GLM_API_KEY', '')
+
+# CONVERTAPI CONFIGURATION
+CONVERT_API_KEY = os.getenv('CONVERT_API_KEY', '')
+if CONVERT_API_KEY:
+    convertapi.api_credentials = CONVERT_API_KEY
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -2700,6 +2707,316 @@ print("DEBUG: After upload_file_textract function, about to register searchable 
 # Register searchable PDF route
 print("DEBUG: Registering searchable PDF route...")
 
+def convert_pdf_to_searchable_ocrmypdf(input_path, task_id, user_id):
+    """Convert PDF to searchable using OCRmyPDF (local, fast)"""
+    try:
+        processing_status[task_id] = {
+            'status': 'processing',
+            'message': 'Converting PDF to searchable format with OCRmyPDF (local)...',
+            'progress': 10,
+            'user_id': user_id
+        }
+        
+        # Generate output filename
+        base_name = os.path.splitext(os.path.basename(input_path))[0]
+        output_filename = f"{base_name}-converted.pdf"
+        output_path = os.path.join(OUTPUT_FOLDER, output_filename)
+        
+        processing_status[task_id]['message'] = 'Running OCR with Tesseract...'
+        processing_status[task_id]['progress'] = 30
+        
+        # Suppress OCRmyPDF verbose logging
+        ocrmypdf_logger = logging.getLogger('ocrmypdf')
+        original_level = ocrmypdf_logger.level
+        ocrmypdf_logger.setLevel(logging.ERROR)
+        
+        try:
+            # Convert using OCRmyPDF
+            ocrmypdf.ocr(
+                input_path,
+                output_path,
+                language='eng',           # English language
+                deskew=True,              # Straighten pages
+                optimize=1,               # Optimize output file size
+                skip_text=True,           # Skip pages that already have text
+                force_ocr=False,          # Don't OCR pages that already have text
+                progress_bar=False        # No progress bar in background
+            )
+        finally:
+            # Restore original logging level
+            ocrmypdf_logger.setLevel(original_level)
+        
+        processing_status[task_id]['message'] = 'Searchable PDF created successfully!'
+        processing_status[task_id]['progress'] = 90
+        
+        # Update database status only
+        conn = sqlite3.connect('users.db')
+        cursor = conn.cursor()
+        cursor.execute(
+            'UPDATE processing_jobs SET status = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?',
+            ('completed', task_id)
+        )
+        conn.commit()
+        conn.close()
+        
+        processing_status[task_id] = {
+            'status': 'completed',
+            'message': 'Searchable PDF created successfully with OCRmyPDF',
+            'progress': 100,
+            'result': {
+                'output_file': output_filename,
+                'original_size_kb': round(os.path.getsize(input_path) / 1024, 2),
+                'converted_size_kb': round(os.path.getsize(output_path) / 1024, 2)
+            },
+            'user_id': user_id
+        }
+        
+        logger.info(f"OCRmyPDF conversion completed for task {task_id}")
+        
+    except ocrmypdf.exceptions.PriorOcrFoundError:
+        # PDF already has text, just copy it
+        output_filename = f"{os.path.splitext(os.path.basename(input_path))[0]}-converted.pdf"
+        output_path = os.path.join(OUTPUT_FOLDER, output_filename)
+        import shutil
+        shutil.copy2(input_path, output_path)
+        
+        processing_status[task_id] = {
+            'status': 'completed',
+            'message': 'PDF already contains searchable text',
+            'progress': 100,
+            'result': {
+                'output_file': output_filename,
+                'original_size_kb': round(os.path.getsize(input_path) / 1024, 2),
+                'converted_size_kb': round(os.path.getsize(output_path) / 1024, 2)
+            },
+            'user_id': user_id
+        }
+        
+        conn = sqlite3.connect('users.db')
+        cursor = conn.cursor()
+        cursor.execute(
+            'UPDATE processing_jobs SET status = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?',
+            ('completed', task_id)
+        )
+        conn.commit()
+        conn.close()
+        
+    except Exception as e:
+        logger.error(f"OCRmyPDF conversion failed for task {task_id}: {str(e)}")
+        processing_status[task_id] = {
+            'status': 'failed',
+            'message': f'OCRmyPDF conversion failed: {str(e)}',
+            'progress': 0,
+            'user_id': user_id
+        }
+        
+        # Update database status only
+        conn = sqlite3.connect('users.db')
+        cursor = conn.cursor()
+        cursor.execute(
+            'UPDATE processing_jobs SET status = ? WHERE id = ?',
+            ('failed', task_id)
+        )
+        conn.commit()
+        conn.close()
+
+def convert_pdf_to_searchable_convertapi(input_path, task_id, user_id):
+    """Convert PDF to searchable using ConvertAPI"""
+    try:
+        processing_status[task_id] = {
+            'status': 'processing',
+            'message': 'Converting PDF to searchable format with ConvertAPI...',
+            'progress': 10,
+            'user_id': user_id
+        }
+        
+        # Generate output filename
+        base_name = os.path.splitext(os.path.basename(input_path))[0]
+        output_filename = f"{base_name}-converted"
+        output_dir = OUTPUT_FOLDER
+        
+        processing_status[task_id]['message'] = 'Uploading to ConvertAPI...'
+        processing_status[task_id]['progress'] = 30
+        
+        # Convert using ConvertAPI
+        result = convertapi.convert('ocr', {
+            'File': input_path,
+            'FileName': output_filename
+        }, from_format='pdf')
+        
+        processing_status[task_id]['message'] = 'Downloading converted PDF...'
+        processing_status[task_id]['progress'] = 60
+        
+        # Save the converted file
+        saved_files = result.save_files(output_dir)
+        
+        if not saved_files or len(saved_files) == 0:
+            raise Exception("No files were returned from ConvertAPI")
+        
+        output_path = saved_files[0]
+        
+        processing_status[task_id]['message'] = 'Searchable PDF created successfully!'
+        processing_status[task_id]['progress'] = 90
+        
+        # Update database status only
+        conn = sqlite3.connect('users.db')
+        cursor = conn.cursor()
+        cursor.execute(
+            'UPDATE processing_jobs SET status = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?',
+            ('completed', task_id)
+        )
+        conn.commit()
+        conn.close()
+        
+        processing_status[task_id] = {
+            'status': 'completed',
+            'message': 'Searchable PDF created successfully',
+            'progress': 100,
+            'result': {
+                'output_file': os.path.basename(output_path),
+                'original_size_kb': round(os.path.getsize(input_path) / 1024, 2),
+                'converted_size_kb': round(os.path.getsize(output_path) / 1024, 2)
+            },
+            'user_id': user_id
+        }
+        
+        logger.info(f"ConvertAPI conversion completed for task {task_id}")
+        
+    except Exception as e:
+        logger.error(f"ConvertAPI conversion failed for task {task_id}: {str(e)}")
+        processing_status[task_id] = {
+            'status': 'failed',
+            'message': f'ConvertAPI conversion failed: {str(e)}',
+            'progress': 0,
+            'user_id': user_id
+        }
+        
+        # Update database status only
+        conn = sqlite3.connect('users.db')
+        cursor = conn.cursor()
+        cursor.execute(
+            'UPDATE processing_jobs SET status = ? WHERE id = ?',
+            ('failed', task_id)
+        )
+        conn.commit()
+        conn.close()
+
+@app.route('/api/upload_ocrmypdf', methods=['POST'])
+@jwt_required()
+def upload_file_ocrmypdf():
+    """Upload scanned PDF and convert to searchable PDF using OCRmyPDF (local)"""
+    print("=== OCRMYPDF UPLOAD ENDPOINT CALLED ===")
+    
+    user_id = int(get_jwt_identity())
+    print(f"JWT validation successful, user_id: {user_id}")
+    
+    if 'file' not in request.files:
+        print("Error: No file provided")
+        return jsonify({'error': 'No file provided'}), 400
+    
+    file = request.files['file']
+    print(f"File received: {file.filename}")
+    
+    if file.filename == '' or not allowed_file(file.filename):
+        print(f"Error: Invalid file type or empty filename: {file.filename}")
+        return jsonify({'error': 'Invalid file type. Please upload a PDF file.'}), 400
+    
+    task_id = str(uuid.uuid4())
+    filename = secure_filename(file.filename)
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    input_filename = f"{timestamp}_{filename}"
+    input_path = os.path.join(UPLOAD_FOLDER, input_filename)
+    file.save(input_path)
+
+    conn = sqlite3.connect('users.db')
+    cursor = conn.cursor()
+    cursor.execute(
+        'INSERT INTO processing_jobs (id, user_id, filename, status, created_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)',
+        (task_id, user_id, filename, 'processing')
+    )
+    conn.commit()
+    conn.close()
+
+    processing_status[task_id] = {
+        'status': 'queued',
+        'message': 'File uploaded, queued for OCRmyPDF conversion',
+        'progress': 0,
+        'user_id': user_id
+    }
+
+    thread = threading.Thread(
+        target=convert_pdf_to_searchable_ocrmypdf,
+        args=(input_path, task_id, user_id)
+    )
+    thread.start()
+    
+    print(f"OCRmyPDF conversion started for task_id: {task_id}")
+    return jsonify({
+        'task_id': task_id,
+        'message': 'File uploaded successfully, converting to searchable PDF with OCRmyPDF (local)',
+        'filename': filename
+    })
+
+@app.route('/api/upload_convertapi_ocr', methods=['POST'])
+@jwt_required()
+def upload_file_convertapi_ocr():
+    """Upload scanned PDF and convert to searchable PDF using ConvertAPI"""
+    print("=== CONVERTAPI OCR UPLOAD ENDPOINT CALLED ===")
+    
+    user_id = int(get_jwt_identity())
+    print(f"JWT validation successful, user_id: {user_id}")
+    
+    # Check if ConvertAPI is configured
+    if not CONVERT_API_KEY:
+        return jsonify({'error': 'ConvertAPI is not configured. Please add CONVERT_API_KEY to environment variables.'}), 500
+    
+    if 'file' not in request.files:
+        print("Error: No file provided")
+        return jsonify({'error': 'No file provided'}), 400
+    
+    file = request.files['file']
+    print(f"File received: {file.filename}")
+    
+    if file.filename == '' or not allowed_file(file.filename):
+        print(f"Error: Invalid file type or empty filename: {file.filename}")
+        return jsonify({'error': 'Invalid file type. Please upload a PDF file.'}), 400
+    
+    task_id = str(uuid.uuid4())
+    filename = secure_filename(file.filename)
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    input_filename = f"{timestamp}_{filename}"
+    input_path = os.path.join(UPLOAD_FOLDER, input_filename)
+    file.save(input_path)
+
+    conn = sqlite3.connect('users.db')
+    cursor = conn.cursor()
+    cursor.execute(
+        'INSERT INTO processing_jobs (id, user_id, filename, status, created_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)',
+        (task_id, user_id, filename, 'processing')
+    )
+    conn.commit()
+    conn.close()
+
+    processing_status[task_id] = {
+        'status': 'queued',
+        'message': 'File uploaded, queued for ConvertAPI OCR',
+        'progress': 0,
+        'user_id': user_id
+    }
+
+    thread = threading.Thread(
+        target=convert_pdf_to_searchable_convertapi,
+        args=(input_path, task_id, user_id)
+    )
+    thread.start()
+    
+    print(f"ConvertAPI OCR started for task_id: {task_id}")
+    return jsonify({
+        'task_id': task_id,
+        'message': 'File uploaded successfully, converting to searchable PDF with ConvertAPI',
+        'filename': filename
+    })
+
 @app.route('/api/upload_searchable_pdf', methods=['POST'])
 @jwt_required()
 def upload_file_searchable_pdf():
@@ -3012,7 +3329,14 @@ def download_file(task_id):
     if status['status'] != 'completed':
         return jsonify({'error': 'File not ready for download'}), 400
     
-    output_file = status['output_file']
+    # Handle different status structures - check both direct and nested in 'result'
+    if 'output_file' in status:
+        output_file = status['output_file']
+    elif 'result' in status and 'output_file' in status['result']:
+        output_file = status['result']['output_file']
+    else:
+        return jsonify({'error': 'Output file information not found'}), 404
+    
     output_path = os.path.join(OUTPUT_FOLDER, output_file)
     
     if not os.path.exists(output_path):
@@ -3039,10 +3363,18 @@ def download_all(task_id):
     zip_path = os.path.join(OUTPUT_FOLDER, zip_filename)
     
     with zipfile.ZipFile(zip_path, 'w') as zipf:
-        output_file = status['output_file']
-        output_path = os.path.join(OUTPUT_FOLDER, output_file)
-        if os.path.exists(output_path):
-            zipf.write(output_path, output_file)
+        # Handle different status structures
+        if 'output_file' in status:
+            output_file = status['output_file']
+        elif 'result' in status and 'output_file' in status['result']:
+            output_file = status['result']['output_file']
+        else:
+            output_file = None
+            
+        if output_file:
+            output_path = os.path.join(OUTPUT_FOLDER, output_file)
+            if os.path.exists(output_path):
+                zipf.write(output_path, output_file)
     
         if 'tables' in status and status['tables'] and status['tables_dir']:
             tables_dir = status['tables_dir']

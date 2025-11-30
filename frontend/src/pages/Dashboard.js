@@ -206,9 +206,17 @@ const Dashboard = () => {
         response = await ocrService.uploadFileLLMWhisperer(file);
         toast.success('File uploaded! Processing with LLMWhisperer...');
       } else if (extractionMethod === 'searchable_pdf') {
-        // Searchable PDF creation
+        // Searchable PDF creation (AWS Textract)
         response = await ocrService.uploadFileSearchablePDF(file);
-        toast.success('File uploaded! Creating searchable PDF...');
+        toast.success('File uploaded! Creating searchable PDF with AWS Textract...');
+      } else if (extractionMethod === 'ocrmypdf') {
+        // Searchable PDF creation (OCRmyPDF - local)
+        response = await ocrService.uploadFileOCRmyPDF(file);
+        toast.success('File uploaded! Creating searchable PDF with OCRmyPDF (local, fast)...');
+      } else if (extractionMethod === 'convertapi_ocr') {
+        // Searchable PDF creation (ConvertAPI)
+        response = await ocrService.uploadFileConvertAPIocr(file);
+        toast.success('File uploaded! Creating searchable PDF with ConvertAPI...');
       } else if (extractionMethod === 'gpt4o_vision') {
         // GPT-4o Vision extraction (fast)
         if (!customPrompts || customPrompts.trim() === '') {
@@ -308,7 +316,11 @@ const Dashboard = () => {
       } else if (processedResults.extraction_method === 'direct_llm' || processedResults.extraction_method === 'textract') {
         a.download = type === 'all' ? 'OCR_Results.zip' : 'textract_extraction.txt';
       } else if (processedResults.extraction_method === 'searchable_pdf') {
-        a.download = type === 'all' ? 'OCR_Results.zip' : 'searchable_document.pdf';
+        a.download = type === 'all' ? 'OCR_Results.zip' : 'searchable_document_textract.pdf';
+      } else if (processedResults.extraction_method === 'ocrmypdf') {
+        a.download = type === 'all' ? 'OCR_Results.zip' : 'searchable_document_ocrmypdf.pdf';
+      } else if (processedResults.extraction_method === 'convertapi_ocr') {
+        a.download = type === 'all' ? 'OCR_Results.zip' : 'searchable_document_convertapi.pdf';
       } else {
         a.download = type === 'all' ? 'OCR_Results.zip' : 'searchable_document.pdf';
       }
@@ -499,8 +511,38 @@ const Dashboard = () => {
                         className="h-4 w-4 mt-0.5 text-primary-600 border-gray-300 focus:ring-primary-500"
                       />
                       <div className="ml-3">
-                        <span className="text-sm font-medium text-gray-900">Create Searchable PDF</span>
-                        <p className="text-xs text-gray-500">Convert scanned PDF to searchable PDF</p>
+                        <span className="text-sm font-medium text-gray-900">Create Searchable PDF (AWS Textract)</span>
+                        <p className="text-xs text-gray-500">Convert scanned PDF to searchable PDF using AWS</p>
+                      </div>
+                    </label>
+                    
+                    <label className="flex items-start cursor-pointer">
+                      <input
+                        type="radio"
+                        name="extractionMethod"
+                        value="ocrmypdf"
+                        checked={extractionMethod === 'ocrmypdf'}
+                        onChange={(e) => setExtractionMethod(e.target.value)}
+                        className="h-4 w-4 mt-0.5 text-primary-600 border-gray-300 focus:ring-primary-500"
+                      />
+                      <div className="ml-3">
+                        <span className="text-sm font-medium text-gray-900">Create Searchable PDF (OCRmyPDF)</span>
+                        <p className="text-xs text-gray-500">Fast local conversion using Tesseract (free)</p>
+                      </div>
+                    </label>
+                    
+                    <label className="flex items-start cursor-pointer">
+                      <input
+                        type="radio"
+                        name="extractionMethod"
+                        value="convertapi_ocr"
+                        checked={extractionMethod === 'convertapi_ocr'}
+                        onChange={(e) => setExtractionMethod(e.target.value)}
+                        className="h-4 w-4 mt-0.5 text-primary-600 border-gray-300 focus:ring-primary-500"
+                      />
+                      <div className="ml-3">
+                        <span className="text-sm font-medium text-gray-900">Create Searchable PDF (ConvertAPI)</span>
+                        <p className="text-xs text-gray-500">Convert scanned PDF to searchable PDF using ConvertAPI</p>
                       </div>
                     </label>
                     
