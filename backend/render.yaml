@@ -33,7 +33,7 @@ services:
         sync: false
       - key: GLM_API_KEY
         sync: false
-    healthCheckPath: /api/system/abaqus-status
+    healthCheckPath: /
 
 databases:
   - name: ocr-fem-db

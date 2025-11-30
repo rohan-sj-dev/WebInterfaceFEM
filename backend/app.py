@@ -2437,6 +2437,16 @@ Please analyze the document images above and provide a comprehensive answer to t
         }
         logger.error(f"GPT-4o Vision processing failed: {e}")
 
+@app.route('/', methods=['GET'])
+def root():
+    """Root endpoint for health checks"""
+    return jsonify({
+        'status': 'ok',
+        'service': 'OCR-FEM Backend',
+        'version': '1.0.0',
+        'abaqus_available': ABAQUS_AVAILABLE
+    }), 200
+
 @app.route('/api/system/abaqus-status', methods=['GET'])
 def get_abaqus_status():
     """Check if ABAQUS is available on this system"""
