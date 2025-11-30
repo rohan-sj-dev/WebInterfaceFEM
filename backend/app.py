@@ -20,7 +20,7 @@ import pikepdf
 import base64
 from openai import OpenAI
 from glm_vision_service import GLMVisionService
-from database import get_db, init_db
+from database import get_db, init_db, is_postgres_db
 
 
 # Load environment variables from .env file
@@ -130,7 +130,7 @@ def allowed_file(filename):
 def get_user_by_email(email):
     with get_db() as conn:
         cursor = conn.cursor()
-        placeholder = '%s' if conn.is_postgres else '?'
+        placeholder = '%s' if is_postgres_db() else '?'
         cursor.execute(f'SELECT * FROM users WHERE email = {placeholder}', (email,))
         row = cursor.fetchone()
         if row:
@@ -145,7 +145,7 @@ def create_user(email, password, full_name):
         password_hash = generate_password_hash(password)
         with get_db() as conn:
             cursor = conn.cursor()
-            if conn.is_postgres:
+            if is_postgres_db():
                 cursor.execute(
                     'INSERT INTO users (email, password_hash, full_name) VALUES (%s, %s, %s) RETURNING id',
                     (email, password_hash, full_name)

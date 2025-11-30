@@ -5,9 +5,13 @@ from contextlib import contextmanager
 # Defaults to SQLite for local development
 DATABASE_URL = os.getenv('DATABASE_URL', 'users.db')
 
+def is_postgres_db():
+    """Check if using PostgreSQL"""
+    return DATABASE_URL.startswith('postgresql://') or DATABASE_URL.startswith('postgres://')
+
 def get_db_connection():
     """Get database connection - supports both SQLite and PostgreSQL"""
-    if DATABASE_URL.startswith('postgresql://') or DATABASE_URL.startswith('postgres://'):
+    if is_postgres_db():
         # PostgreSQL connection (for Render)
         import psycopg2
         from urllib.parse import urlparse
@@ -23,14 +27,12 @@ def get_db_connection():
             host=result.hostname,
             port=result.port
         )
-        conn.is_postgres = True
         return conn
     else:
         # SQLite connection (for local development)
         import sqlite3
         conn = sqlite3.connect(DATABASE_URL)
         conn.row_factory = sqlite3.Row
-        conn.is_postgres = False
         return conn
 
 @contextmanager
@@ -52,7 +54,7 @@ def init_db():
         cursor = conn.cursor()
         
         # Create users table
-        if conn.is_postgres:
+        if is_postgres_db():
             # PostgreSQL syntax
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS users (
@@ -76,7 +78,7 @@ def init_db():
             ''')
         
         conn.commit()
-        print(f"✓ Database initialized successfully ({'PostgreSQL' if conn.is_postgres else 'SQLite'})")
+        print(f"✓ Database initialized successfully ({'PostgreSQL' if is_postgres_db() else 'SQLite'})")
 
 if __name__ == '__main__':
     init_db()
