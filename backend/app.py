@@ -57,21 +57,34 @@ logger = logging.getLogger(__name__)
 # Check if ABAQUS is available on this system
 def check_abaqus_availability():
     """Check if ABAQUS is installed and accessible"""
-    try:
-        result = subprocess.run(
-            'abaqus information=all',
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=10
-        )
-        return result.returncode == 0
-    except Exception as e:
-        logger.info(f"ABAQUS not available: {str(e)}")
-        return False
+    abaqus_paths = [
+        r"C:\SIMULIA\Commands\abaqus.bat",
+        r"C:\Program Files\Dassault Systemes\SimulationServices\V6R2017x\win_b64\code\bin\ABQLauncher.exe",
+        r"C:\SIMULIA\Abaqus\Commands\abaqus.bat",
+        "abaqus"  # Check PATH as fallback
+    ]
+    
+    for abaqus_cmd in abaqus_paths:
+        try:
+            result = subprocess.run(
+                f'{abaqus_cmd} information=all',
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            if result.returncode == 0:
+                logger.info(f"ABAQUS found at: {abaqus_cmd}")
+                return abaqus_cmd
+        except Exception:
+            continue
+    
+    logger.info("ABAQUS not available: No valid ABAQUS installation found")
+    return None
 
 # Global flag for ABAQUS availability
-ABAQUS_AVAILABLE = check_abaqus_availability()
+ABAQUS_PATH = check_abaqus_availability()
+ABAQUS_AVAILABLE = ABAQUS_PATH is not None
 if ABAQUS_AVAILABLE:
     logger.info("✓ ABAQUS detected - Simulation features enabled")
 else:
@@ -4147,7 +4160,7 @@ def run_abaqus_simulation(task_id):
                 # ABAQUS command: abaqus job=<jobname> input=<inputfile> interactive
                 # Use shell=True on Windows to access PATH commands properly
                 # Since cwd is set to inp_dir, use only the filename for input
-                abaqus_cmd = f'abaqus job={inp_name} input="{inp_filename}" interactive ask_delete=OFF'
+                abaqus_cmd = f'{ABAQUS_PATH} job={inp_name} input="{inp_filename}" interactive ask_delete=OFF'
                 
                 logger.info(f"Running ABAQUS: {abaqus_cmd}")
                 logger.info(f"Working directory: {inp_dir}")
