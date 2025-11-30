@@ -2,6 +2,7 @@ services:
   - type: web
     name: ocr-fem-backend
     runtime: python
+    pythonVersion: "3.11"
     rootDir: backend
     buildCommand: chmod +x render-build.sh && ./render-build.sh
     startCommand: gunicorn --bind 0.0.0.0:$PORT --timeout 300 app:app
