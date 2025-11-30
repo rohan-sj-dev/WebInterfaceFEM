@@ -2500,18 +2500,18 @@ def login():
     password = data['password']
     
     user = get_user_by_email(email)
-    if not user or not check_password_hash(user[2], password):
+    if not user or not check_password_hash(user['password_hash'], password):
         return jsonify({'error': 'Invalid email or password'}), 401
 
-    access_token = create_access_token(identity=str(user[0]))
+    access_token = create_access_token(identity=str(user['id']))
     
     return jsonify({
         'message': 'Login successful',
         'access_token': access_token,
         'user': {
-            'id': user[0],
-            'email': user[1],
-            'fullName': user[3]
+            'id': user['id'],
+            'email': user['email'],
+            'fullName': user['full_name']
         }
     })
 
