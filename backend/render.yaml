@@ -9,6 +9,8 @@ services:
     envVars:
       - key: JWT_SECRET_KEY
         generateValue: true
+      - key: ALLOWED_ORIGINS
+        value: https://abaqus-web-interface.netlify.app
       - key: FLASK_ENV
         value: production
       - key: DATABASE_URL
