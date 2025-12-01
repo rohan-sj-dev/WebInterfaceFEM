@@ -32,7 +32,7 @@ const Dashboard = () => {
   });
   const [customPrompts, setCustomPrompts] = useState('');
   const [selectedModel, setSelectedModel] = useState('gpt-4-turbo');
-  const [extractionMethod, setExtractionMethod] = useState('unstract'); // 'local', 'unstract', 'direct_llm'
+  const [extractionMethod, setExtractionMethod] = useState('ocrmypdf'); // default to OCRmyPDF
   const [serialNumber, setSerialNumber] = useState('');
   const [simRunning, setSimRunning] = useState(false);
   const [simLog, setSimLog] = useState('');
@@ -195,24 +195,7 @@ const Dashboard = () => {
       let response;
       
       // Choose extraction method
-      if (extractionMethod === 'abaqus_fem') {
-        // ABAQUS FEM Integration
-        if (!serialNumber || serialNumber.trim() === '') {
-          toast.error('Please provide a serial number for ABAQUS FEM processing');
-          setProcessing(false);
-          return;
-        }
-        response = await ocrService.uploadFileAbaqusFEM(file, serialNumber);
-        toast.success('File uploaded! Extracting dimensions and stress-strain data...');
-      } else if (extractionMethod === 'llmwhisperer') {
-        // LLMWhisperer text extraction
-        response = await ocrService.uploadFileLLMWhisperer(file);
-        toast.success('File uploaded! Processing with LLMWhisperer...');
-      } else if (extractionMethod === 'searchable_pdf') {
-        // Searchable PDF creation (AWS Textract)
-        response = await ocrService.uploadFileSearchablePDF(file);
-        toast.success('File uploaded! Creating searchable PDF with AWS Textract...');
-      } else if (extractionMethod === 'ocrmypdf') {
+      if (extractionMethod === 'ocrmypdf') {
         // Searchable PDF creation (OCRmyPDF - local)
         response = await ocrService.uploadFileOCRmyPDF(file);
         toast.success('File uploaded! Creating searchable PDF with OCRmyPDF (local, fast)...');
@@ -220,24 +203,6 @@ const Dashboard = () => {
         // Searchable PDF creation (ConvertAPI)
         response = await ocrService.uploadFileConvertAPIocr(file);
         toast.success('File uploaded! Creating searchable PDF with ConvertAPI...');
-      } else if (extractionMethod === 'gpt4o_vision') {
-        // GPT-4o Vision extraction (fast)
-        if (!customPrompts || customPrompts.trim() === '') {
-          toast.error('Please provide a custom query for GPT-4o Vision extraction');
-          setProcessing(false);
-          return;
-        }
-        response = await ocrService.uploadFileGPT4oVision(file, customPrompts);
-        toast.success('File uploaded! Processing with GPT-4o Vision (fast)...');
-      } else if (extractionMethod === 'gpt4o_hybrid') {
-        // GPT-4o Hybrid extraction
-        if (!customPrompts || customPrompts.trim() === '') {
-          toast.error('Please provide a custom query for GPT-4o hybrid extraction');
-          setProcessing(false);
-          return;
-        }
-        response = await ocrService.uploadFileGPT4oHybrid(file, customPrompts);
-        toast.success('File uploaded! Processing with GPT-4o hybrid approach...');
       } else if (extractionMethod === 'glm_table_extraction') {
         // GLM-4.5V Table Extraction
         response = await ocrService.uploadFileGLMTableExtraction(file, customPrompts);
@@ -255,18 +220,10 @@ const Dashboard = () => {
         }
         response = await ocrService.uploadFileGLMCustomQuery(file, customPrompts);
         toast.success('File uploaded! Extracting data with GLM-4.5V...');
-      } else if (extractionMethod === 'direct_llm') {
-        // Direct LLM calling (GPT-4o/Claude)
-        response = await ocrService.uploadFileDirectLLM(file, customPrompts, selectedModel);
-        toast.success(`File uploaded! Processing with ${selectedModel}...`);
-      } else if (extractionMethod === 'unstract') {
-        // Unstract API
-        response = await ocrService.uploadFileUnstract(file, customPrompts, selectedModel);
-        toast.success('File uploaded to Unstract! Processing started...');
       } else {
-        // Local OCR
-        response = await ocrService.uploadFile(file, options);
-        toast.success('File uploaded successfully! Processing started...');
+        toast.error('Please select a valid extraction method');
+        setProcessing(false);
+        return;
       }
       
       const taskId = response.task_id;
@@ -323,13 +280,7 @@ const Dashboard = () => {
       a.href = url;
       
       // Set filename based on extraction method
-      if (processedResults.extraction_method === 'llmwhisperer') {
-        a.download = type === 'all' ? 'OCR_Results.zip' : 'extracted_text.txt';
-      } else if (processedResults.extraction_method === 'direct_llm' || processedResults.extraction_method === 'textract') {
-        a.download = type === 'all' ? 'OCR_Results.zip' : 'textract_extraction.txt';
-      } else if (processedResults.extraction_method === 'searchable_pdf') {
-        a.download = type === 'all' ? 'OCR_Results.zip' : 'searchable_document_textract.pdf';
-      } else if (processedResults.extraction_method === 'ocrmypdf') {
+      if (processedResults.extraction_method === 'ocrmypdf') {
         a.download = type === 'all' ? 'OCR_Results.zip' : 'searchable_document_ocrmypdf.pdf';
       } else if (processedResults.extraction_method === 'convertapi_ocr') {
         a.download = type === 'all' ? 'OCR_Results.zip' : 'searchable_document_convertapi.pdf';
@@ -459,81 +410,6 @@ const Dashboard = () => {
                       <input
                         type="radio"
                         name="extractionMethod"
-                        value="local"
-                        checked={extractionMethod === 'local'}
-                        onChange={(e) => setExtractionMethod(e.target.value)}
-                        className="h-4 w-4 mt-0.5 text-primary-600 border-gray-300 focus:ring-primary-500"
-                      />
-                      <div className="ml-3">
-                        <span className="text-sm font-medium text-gray-900">Local OCR</span>
-                        <p className="text-xs text-gray-500">Basic text extraction using local libraries</p>
-                      </div>
-                    </label>
-                    
-                    <label className="flex items-start cursor-pointer">
-                      <input
-                        type="radio"
-                        name="extractionMethod"
-                        value="unstract"
-                        checked={extractionMethod === 'unstract'}
-                        onChange={(e) => setExtractionMethod(e.target.value)}
-                        className="h-4 w-4 mt-0.5 text-primary-600 border-gray-300 focus:ring-primary-500"
-                      />
-                      <div className="ml-3">
-                        <span className="text-sm font-medium text-gray-900">Unstract API</span>
-                        <p className="text-xs text-gray-500">Cloud-based Table Extraction</p>
-                      </div>
-                    </label>
-                    
-                    <label className="flex items-start cursor-pointer">
-                      <input
-                        type="radio"
-                        name="extractionMethod"
-                        value="llmwhisperer"
-                        checked={extractionMethod === 'llmwhisperer'}
-                        onChange={(e) => setExtractionMethod(e.target.value)}
-                        className="h-4 w-4 mt-0.5 text-primary-600 border-gray-300 focus:ring-primary-500"
-                      />
-                      <div className="ml-3">
-                        <span className="text-sm font-medium text-gray-900">LLMWhisperer</span>
-                        <p className="text-xs text-gray-500">Text extraction with layout preservation (Unstract)</p>
-                      </div>
-                    </label>
-                    
-                    <label className="flex items-start cursor-pointer">
-                      <input
-                        type="radio"
-                        name="extractionMethod"
-                        value="direct_llm"
-                        checked={extractionMethod === 'direct_llm'}
-                        onChange={(e) => setExtractionMethod(e.target.value)}
-                        className="h-4 w-4 mt-0.5 text-primary-600 border-gray-300 focus:ring-primary-500"
-                      />
-                      <div className="ml-3">
-                        <span className="text-sm font-medium text-gray-900">AWS Textract (Custom Queries)</span>
-                        <p className="text-xs text-gray-500">Queries - extract specific data</p>
-                      </div>
-                    </label>
-                    
-                    <label className="flex items-start cursor-pointer">
-                      <input
-                        type="radio"
-                        name="extractionMethod"
-                        value="searchable_pdf"
-                        checked={extractionMethod === 'searchable_pdf'}
-                        onChange={(e) => setExtractionMethod(e.target.value)}
-                        className="h-4 w-4 mt-0.5 text-primary-600 border-gray-300 focus:ring-primary-500"
-                      />
-                      <div className="ml-3">
-                        <span className="text-sm font-medium text-gray-900">Create Searchable PDF (AWS Textract)</span>
-                        <p className="text-xs text-gray-500">Convert scanned PDF to searchable PDF using AWS</p>
-                      </div>
-                    </label>
-                    
-                    <label className="flex items-start cursor-pointer">
-                      <input
-                        type="radio"
-                        name="extractionMethod"
                         value="ocrmypdf"
                         checked={extractionMethod === 'ocrmypdf'}
                         onChange={(e) => setExtractionMethod(e.target.value)}
@@ -557,51 +433,6 @@ const Dashboard = () => {
                       <div className="ml-3">
                         <span className="text-sm font-medium text-gray-900">Create Searchable PDF (ConvertAPI)</span>
                         <p className="text-xs text-gray-500">Convert scanned PDF to searchable PDF using ConvertAPI</p>
-                      </div>
-                    </label>
-                    
-                    <label className="flex items-start cursor-pointer">
-                      <input
-                        type="radio"
-                        name="extractionMethod"
-                        value="gpt4o_vision"
-                        checked={extractionMethod === 'gpt4o_vision'}
-                        onChange={(e) => setExtractionMethod(e.target.value)}
-                        className="h-4 w-4 mt-0.5 text-primary-600 border-gray-300 focus:ring-primary-500"
-                      />
-                      <div className="ml-3">
-                        <span className="text-sm font-medium text-gray-900">GPT-4o Vision</span>
-                        <p className="text-xs text-gray-500">AI-powered query extraction using GPT-4o vision</p>
-                      </div>
-                    </label>
-                    
-                    <label className="flex items-start cursor-pointer">
-                      <input
-                        type="radio"
-                        name="extractionMethod"
-                        value="gpt4o_hybrid"
-                        checked={extractionMethod === 'gpt4o_hybrid'}
-                        onChange={(e) => setExtractionMethod(e.target.value)}
-                        className="h-4 w-4 mt-0.5 text-primary-600 border-gray-300 focus:ring-primary-500"
-                      />
-                      <div className="ml-3">
-                        <span className="text-sm font-medium text-gray-900">GPT-4o (Multimodal)</span>
-                        <p className="text-xs text-gray-500">GPT-4o with both PDF images and LLMWhisperer text</p>
-                      </div>
-                    </label>
-                    
-                    <label className="flex items-start cursor-pointer">
-                      <input
-                        type="radio"
-                        name="extractionMethod"
-                        value="abaqus_fem"
-                        checked={extractionMethod === 'abaqus_fem'}
-                        onChange={(e) => setExtractionMethod(e.target.value)}
-                        className="h-4 w-4 mt-0.5 text-primary-600 border-gray-300 focus:ring-primary-500"
-                      />
-                      <div className="ml-3">
-                        <span className="text-sm font-medium text-gray-900">ABAQUS FEM Generator</span>
-                        <p className="text-xs text-gray-500">Extract dimensions & stress-strain, generate .inp file</p>
                       </div>
                     </label>
                     
@@ -652,8 +483,8 @@ const Dashboard = () => {
                   </div>
                 </div>
                 
-                {/* Serial Number Input - Show for ABAQUS FEM or GLM ABAQUS */}
-                {(extractionMethod === 'abaqus_fem' || extractionMethod === 'glm_abaqus_generator') && (
+                {/* Serial Number Input - Show for GLM ABAQUS */}
+                {extractionMethod === 'glm_abaqus_generator' && (
                   <div className="space-y-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -673,47 +504,22 @@ const Dashboard = () => {
                   </div>
                 )}
                 
-                {/* Query/Prompt Input - Show for Unstract, Textract, GPT-4o Vision, GPT-4o Hybrid, GLM Table Extraction, or GLM Custom Query */}
-                {(extractionMethod === 'unstract' || extractionMethod === 'direct_llm' || extractionMethod === 'gpt4o_vision' || extractionMethod === 'gpt4o_hybrid' || extractionMethod === 'glm_table_extraction' || extractionMethod === 'glm_custom_query') && (
+                {/* Query/Prompt Input - Show for GLM Table Extraction or GLM Custom Query */}
+                {(extractionMethod === 'glm_table_extraction' || extractionMethod === 'glm_custom_query') && (
                   <div className="space-y-4">
-                    {/* Model Selection - Only for Unstract */}
-                    {extractionMethod === 'unstract' && (
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          AI Model
-                        </label>
-                        <select
-                          value={selectedModel}
-                          onChange={(e) => setSelectedModel(e.target.value)}
-                          className="input-field w-full"
-                        >
-                          <option value="gpt-4-turbo">GPT-4 Turbo</option>
-                          <option value="azure-gpt-4o">Azure GPT-4o</option>
-                        </select>
-                        <p className="mt-1 text-xs text-gray-500">
-                          Choose the AI model for extraction
-                        </p>
-                      </div>
-                    )}
-                    
                     {/* Custom Query/Prompt */}
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
-                        {extractionMethod === 'direct_llm' ? 'Custom Queries' : 'Custom Extraction Prompt'}
+                        Custom Extraction Prompt
                       </label>
                       <textarea
                         value={customPrompts}
                         onChange={(e) => setCustomPrompts(e.target.value)}
                         className="input-field w-full h-32 resize-none"
-                        placeholder={extractionMethod === 'direct_llm' 
-                          ? "Enter questions to extract from the document (one per line):\n\nExamples:\n- What is the invoice number?\n- What is the total amount?\n- Who is the customer?\n- What is the due date?"
-                          : "Enter your custom extraction instructions here...\n\nExample:\nExtract all invoice data including customer details, line items, and totals. Format as CSV with proper headers."
-                        }
+                        placeholder="Enter your custom extraction instructions here...\n\nExample:\nExtract all invoice data including customer details, line items, and totals. Format as CSV with proper headers."
                       />
                       <p className="mt-1 text-xs text-gray-500">
-                        {extractionMethod === 'direct_llm'
-                          ? 'AWS Textract will answer these specific questions from your document'
-                          : extractionMethod === 'glm_table_extraction'
+                        {extractionMethod === 'glm_table_extraction'
                           ? 'Leave empty for default table extraction, or provide custom instructions for specialized extraction'
                           : 'Specify exactly what data you want to extract and how to format it'
                         }
@@ -722,209 +528,6 @@ const Dashboard = () => {
                   </div>
                 )}
                 
-                {/* Local OCR Options */}
-                {extractionMethod === 'local' && (
-                  <>
-                    {/* Language Selection */}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        OCR Language
-                      </label>
-                      <select
-                        value={options.language}
-                        onChange={(e) => handleOptionChange('language', e.target.value)}
-                        className="input-field w-full"
-                      >
-                        <option value="eng">English</option>
-                        <option value="spa">Spanish</option>
-                        <option value="fra">French</option>
-                        <option value="deu">German</option>
-                        <option value="chi_sim">Chinese (Simplified)</option>
-                      </select>
-                    </div>
-
-                    {/* Enhancement Options */}
-                    <div className="space-y-3">
-                      <label className="flex items-center">
-                        <input
-                          type="checkbox"
-                          checked={options.deskew}
-                          onChange={(e) => handleOptionChange('deskew', e.target.checked)}
-                          className="h-4 w-4 text-primary-600 rounded border-gray-300 focus:ring-primary-500"
-                        />
-                        <span className="ml-2 text-sm text-gray-700">
-                          Auto-rotate and deskew pages
-                        </span>
-                      </label>
-
-                      <label className="flex items-center">
-                        <input
-                          type="checkbox"
-                          checked={options.clean}
-                          onChange={(e) => handleOptionChange('clean', e.target.checked)}
-                          className="h-4 w-4 text-primary-600 rounded border-gray-300 focus:ring-primary-500"
-                        />
-                        <span className="ml-2 text-sm text-gray-700">
-                          Clean and remove noise from pages
-                        </span>
-                      </label>
-
-                      <label className="flex items-center">
-                        <input
-                          type="checkbox"
-                          checked={options.force_ocr}
-                          onChange={(e) => handleOptionChange('force_ocr', e.target.checked)}
-                          className="h-4 w-4 text-primary-600 rounded border-gray-300 focus:ring-primary-500"
-                        />
-                        <span className="ml-2 text-sm text-gray-700">
-                          Force OCR on all pages (even if text exists)
-                        </span>
-                      </label>
-                    </div>
-                  </>
-                )}
-                
-                {/* Old checkbox - keeping for backwards compatibility but hidden */}
-                <input
-                  type="checkbox"
-                  checked={extractionMethod !== 'local'}
-                  onChange={(e) => setExtractionMethod(e.target.checked ? 'unstract' : 'local')}
-                  className="hidden"
-                />
-              </div>
-            </div>
-
-            {/* Remove old options section */}
-            <div className="hidden">
-              <div className="space-y-6">
-                {/* Extraction Method */}
-                <div className="border-b border-gray-200 pb-4">
-                  <label className="flex items-center">
-                    <input
-                      type="checkbox"
-                      checked={options.use_unstract}
-                      onChange={(e) => handleOptionChange('use_unstract', e.target.checked)}
-                      className="h-4 w-4 text-primary-600 rounded border-gray-300 focus:ring-primary-500"
-                    />
-                    <span className="ml-2 text-sm font-semibold text-gray-900">
-                      Extract data via Unstract API
-                    </span>
-                  </label>
-                  <p className="ml-6 mt-1 text-xs text-gray-500">
-                    Use cloud-based Unstract AI for advanced data extraction
-                  </p>
-                  
-                  {/* Custom Prompts - Only show if Unstract is selected */}
-                  {options.use_unstract && (
-                    <div className="ml-6 mt-4 space-y-4">
-                      {/* Model Selection */}
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          AI Model
-                        </label>
-                        <select
-                          value={selectedModel}
-                          onChange={(e) => setSelectedModel(e.target.value)}
-                          className="input-field w-full"
-                        >
-                          <option value="gpt-4-turbo">GPT-4 Turbo</option>
-                          <option value="azure-gpt-4o">Azure GPT-4o</option>
-                        </select>
-                        <p className="mt-1 text-xs text-gray-500">
-                          Choose the AI model for extraction
-                        </p>
-                      </div>
-                      
-                      {/* Custom Prompts */}
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Custom Extraction Prompts
-                        </label>
-                        <textarea
-                          value={customPrompts}
-                          onChange={(e) => setCustomPrompts(e.target.value)}
-                          placeholder="Enter custom instructions to override default invoice extraction"
-                          rows={5}
-                          className="input-field w-full resize-vertical"
-                        />
-
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* Local OCR Options - Only show if Unstract is NOT selected */}
-                {!options.use_unstract && (
-                  <>
-                    {/* Optimization */}
-                    <div className="max-w-lg mx-auto">
-                      <label className="block text-sm font-medium text-gray-700 mb-2 text-center">
-                        Optimization Level
-                      </label>
-                      <select
-                        value={options.optimize}
-                        onChange={(e) => handleOptionChange('optimize', e.target.value)}
-                        className="input-field w-full"
-                      >
-                        <option value="0">No optimization (Largest file)</option>
-                        <option value="1">Basic optimization (Recommended)</option>
-                        <option value="2">Moderate optimization (Smaller file)</option>
-                        <option value="3">Aggressive optimization (Smallest file)</option>
-                      </select>
-                    </div>
-
-                    {/* Checkboxes */}
-                    <div className="space-y-3 max-w-lg mx-auto">
-                      <label className="flex items-center">
-                        <input
-                          type="checkbox"
-                          checked={options.deskew}
-                          onChange={(e) => handleOptionChange('deskew', e.target.checked)}
-                          className="h-4 w-4 text-primary-600 rounded border-gray-300 focus:ring-primary-500"
-                        />
-                        <span className="ml-2 text-sm text-gray-700">
-                          <strong>Deskew</strong> - Fix tilted or rotated pages
-                        </span>
-                      </label>
-
-                      <label className="flex items-center">
-                        <input
-                          type="checkbox"
-                          checked={options.clean}
-                          onChange={(e) => handleOptionChange('clean', e.target.checked)}
-                          className="h-4 w-4 text-primary-600 rounded border-gray-300 focus:ring-primary-500"
-                        />
-                        <span className="ml-2 text-sm text-gray-700">
-                          <strong>Clean</strong> - Remove noise and artifacts
-                        </span>
-                      </label>
-
-                      <label className="flex items-center">
-                        <input
-                          type="checkbox"
-                          checked={options.force_ocr}
-                          onChange={(e) => handleOptionChange('force_ocr', e.target.checked)}
-                          className="h-4 w-4 text-primary-600 rounded border-gray-300 focus:ring-primary-500"
-                        />
-                        <span className="ml-2 text-sm text-gray-700">
-                          <strong>Force OCR</strong> - Re-process existing text layers
-                        </span>
-                      </label>
-
-                      <label className="flex items-center">
-                        <input
-                          type="checkbox"
-                          checked={options.extract_tables}
-                          onChange={(e) => handleOptionChange('extract_tables', e.target.checked)}
-                          className="h-4 w-4 text-primary-600 rounded border-gray-300 focus:ring-primary-500"
-                        />
-                        <span className="ml-2 text-sm text-gray-700">
-                          <strong>Extract Tables</strong> - Export tables to CSV/Excel
-                        </span>
-                      </label>
-                    </div>
-                  </>
-                )}
               </div>
             </div>
 
@@ -937,11 +540,11 @@ const Dashboard = () => {
               {processing ? (
                 <div className="flex items-center justify-center">
                   <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2"></div>
-                  {options.use_unstract ? 'Processing with Unstract...' : 'Processing...'}
+                  Processing...
                 </div>
               ) : (
                 <div className="flex items-center justify-center">
-                  {options.use_unstract ? 'Extract Data with Unstract' : 'Start Converting to Searchable PDF'}
+                  Start Processing
                 </div>
               )}
             </button>

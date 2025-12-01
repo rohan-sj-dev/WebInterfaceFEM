@@ -5,6 +5,22 @@ from pdf2image import convert_from_path # Requires poppler installed
 
 client = ZhipuAI(api_key="")
 
+def clean_glm_output(text: str) -> str:
+    """
+    Clean GLM-4.5V output by removing special box tags
+    """
+    if not text:
+        return text
+    
+    # Remove box tags
+    text = text.replace('<|begin_of_box|>', '')
+    text = text.replace('<|end_of_box|>', '')
+    
+    # Clean up extra whitespace
+    text = '\n'.join(line.strip() for line in text.split('\n') if line.strip())
+    
+    return text
+
 def analyze_pdf_page_as_image(pdf_path):
     # 1. Convert ALL PDF pages to images
     # Note: 'images' is a list of PIL Image objects
@@ -53,6 +69,9 @@ def analyze_pdf_page_as_image(pdf_path):
         "type": "disabled"
         }
     )
-    return response.choices[0].message.content
+    
+    # Clean the output before returning
+    result = response.choices[0].message.content
+    return clean_glm_output(result)
 
 print(analyze_pdf_page_as_image("0047_001-combined.pdf"))

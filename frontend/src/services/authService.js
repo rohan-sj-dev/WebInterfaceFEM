@@ -74,62 +74,6 @@ export const ocrService = {
     });
   },
 
-  uploadFileUnstract: async (file, customPrompts = '', modelName = 'gpt-4-turbo') => {
-    const formData = new FormData();
-    formData.append('file', file);
-    if (customPrompts) {
-      formData.append('custom_prompts', customPrompts);
-    }
-    if (modelName) {
-      formData.append('model_name', modelName);
-    }
-
-    return await api.post('/upload_unstract', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-    });
-  },
-
-  uploadFileDirectLLM: async (file, customPrompt = '', modelName = 'gpt-4o') => {
-    const formData = new FormData();
-    formData.append('file', file);
-    if (customPrompt) {
-      formData.append('custom_prompt', customPrompt);
-    }
-    if (modelName) {
-      formData.append('model_name', modelName);
-    }
-
-    return await api.post('/upload_direct_llm', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-    });
-  },
-
-  uploadFileLLMWhisperer: async (file) => {
-    const formData = new FormData();
-    formData.append('file', file);
-
-    return await api.post('/upload_llmwhisperer', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-    });
-  },
-
-  uploadFileSearchablePDF: async (file) => {
-    const formData = new FormData();
-    formData.append('file', file);
-
-    return await api.post('/upload_searchable_pdf', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-    });
-  },
-
   uploadFileOCRmyPDF: async (file) => {
     const formData = new FormData();
     formData.append('file', file);
@@ -146,42 +90,6 @@ export const ocrService = {
     formData.append('file', file);
 
     return await api.post('/upload_convertapi_ocr', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-    });
-  },
-
-  uploadFileGPT4oVision: async (file, customPrompts) => {
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('custom_prompts', customPrompts);
-
-    return await api.post('/upload_gpt4o_vision', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-    });
-  },
-
-  uploadFileGPT4oHybrid: async (file, customPrompts) => {
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('custom_prompts', customPrompts);
-
-    return await api.post('/upload_gpt4o_hybrid', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-    });
-  },
-
-  uploadFileAbaqusFEM: async (file, serialNumber) => {
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('serial_number', serialNumber);
-
-    return await api.post('/upload_abaqus_fem', formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
       },

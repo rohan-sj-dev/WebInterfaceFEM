@@ -18,6 +18,29 @@ from zhipuai import ZhipuAI
 logger = logging.getLogger(__name__)
 
 
+def clean_glm_output(text: str) -> str:
+    """
+    Clean GLM-4.5V output by removing special box tags and artifacts
+    
+    Args:
+        text: Raw output from GLM model
+        
+    Returns:
+        Cleaned text without box tags
+    """
+    if not text:
+        return text
+    
+    # Remove box tags that GLM sometimes adds
+    text = text.replace('<|begin_of_box|>', '')
+    text = text.replace('<|end_of_box|>', '')
+    
+    # Clean up any extra whitespace created by removal
+    text = '\n'.join(line.strip() for line in text.split('\n') if line.strip())
+    
+    return text
+
+
 class GLMVisionService:
     """Service for GLM-4V Vision API table extraction"""
     
@@ -133,6 +156,10 @@ class GLMVisionService:
             
             # Extract response
             extracted_content = response.choices[0].message.content
+            
+            # Clean GLM output (remove box tags)
+            extracted_content = clean_glm_output(extracted_content)
+            
             usage = {
                 'prompt_tokens': response.usage.prompt_tokens,
                 'completion_tokens': response.usage.completion_tokens,
@@ -371,6 +398,9 @@ Requirements:
                 # Extract content from response
                 if 'choices' in result and len(result['choices']) > 0:
                     extracted_content = result['choices'][0]['message']['content']
+                    
+                    # Clean GLM output (remove box tags)
+                    extracted_content = clean_glm_output(extracted_content)
                     
                     # Token usage
                     usage = result.get('usage', {})
