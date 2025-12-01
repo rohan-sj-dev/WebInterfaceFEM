@@ -11,6 +11,9 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { ocrService } from '../services/authService';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import rehypeSanitize from 'rehype-sanitize';
 import { toast } from 'react-toastify';
 
 const Dashboard = () => {
@@ -1304,11 +1307,13 @@ const Dashboard = () => {
                             <h5 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
                               <span className="text-green-600">💬</span> Extracted Information
                             </h5>
-                            <div className="bg-gray-50 rounded p-4 max-h-96 overflow-y-auto">
-                              <pre className="text-sm text-gray-800 whitespace-pre-wrap font-sans leading-relaxed">
-                                {processedResults.result.extracted_text}
-                              </pre>
-                            </div>
+                                <div className="bg-gray-50 rounded p-4 max-h-96 overflow-y-auto">
+                                  <div className="prose max-w-none text-sm">
+                                    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
+                                      {processedResults.result.extracted_text}
+                                    </ReactMarkdown>
+                                  </div>
+                                </div>
                             <div className="mt-3 flex items-center gap-2 text-xs text-gray-500">
                               <span>✨ Powered by GLM-4.5V Vision AI</span>
                               <span>•</span>
