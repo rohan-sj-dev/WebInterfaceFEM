@@ -330,7 +330,7 @@ const Dashboard = () => {
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center">
               <h1 className="text-xl font-semibold text-gray-900">
-                Searchable PDF Converter
+                Automate ABAQUS simulation
               </h1>
             </div>
             
@@ -361,7 +361,7 @@ const Dashboard = () => {
             {/* Upload Section */}
             <div className="card p-6">
               <h2 className="text-lg font-semibold text-gray-900 mb-4">
-                Convert PDF to Searchable Document
+                Process Legacy Manufacturing Documents
               </h2>
               
               <div
@@ -381,9 +381,6 @@ const Dashboard = () => {
                   <div className="text-center">
                     <p className="text-lg font-medium text-gray-700 mb-2">
                       {isDragActive ? 'Drop your PDF here' : 'Drop PDF here or click to upload'}
-                    </p>
-                    <p className="text-sm text-gray-500">
-                      Transform your scanned PDFs into searchable documents
                     </p>
                     <p className="text-xs text-gray-400 mt-1">
                       Maximum file size: 100MB
@@ -516,7 +513,7 @@ const Dashboard = () => {
                         value={customPrompts}
                         onChange={(e) => setCustomPrompts(e.target.value)}
                         className="input-field w-full h-32 resize-none"
-                        placeholder="Enter your custom extraction instructions here...\n\nExample:\nExtract all invoice data including customer details, line items, and totals. Format as CSV with proper headers."
+                        placeholder="Enter your custom extraction instructions here... Example: Extract all invoice data including customer details, line items, and totals. Format as CSV with proper headers."
                       />
                       <p className="mt-1 text-xs text-gray-500">
                         {extractionMethod === 'glm_table_extraction'
@@ -1396,6 +1393,66 @@ const Dashboard = () => {
                           </div>
                         ))}
                       </div>
+                    )}
+
+                    {/* OCRmyPDF Results */}
+                    {processedResults.extraction_method === 'ocrmypdf' && (
+                      <>
+                        {/* Summary */}
+
+                        {/* Download Button */}
+                        <div className="space-y-2">
+                          <button
+                            onClick={() => handleDownload('pdf')}
+                            className="w-full bg-green-600 hover:bg-green-700 text-white font-medium py-3 px-4 rounded-lg transition-colors flex items-center justify-center"
+                          >
+                            <Download className="h-5 w-5 mr-2" />
+                            Download Searchable PDF
+                          </button>
+                        </div>
+                      </>
+                    )}
+
+                    {/* ConvertAPI OCR Results */}
+                    {processedResults.extraction_method === 'convertapi_ocr' && (
+                      <>
+                        {/* Summary */}
+                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                          <div className="flex items-center justify-center mb-2">
+                            <CheckCircle className="h-6 w-6 text-blue-600 mr-2" />
+                            <h4 className="text-md font-semibold text-blue-900">
+                              Searchable PDF Created with ConvertAPI!
+                            </h4>
+                          </div>
+                          <p className="text-sm text-blue-800 text-center">
+                            Your scanned PDF has been converted to a searchable PDF using ConvertAPI cloud OCR.
+                          </p>
+                          <div className="mt-3 p-3 bg-white border border-blue-200 rounded">
+                            <p className="text-xs text-gray-700 text-center">
+                              ✨ Cloud-based OCR processing<br/>
+                              🔍 Text layer added - searchable with Ctrl+F<br/>
+                              📄 High-accuracy commercial OCR
+                            </p>
+                          </div>
+                          {processedResults.result && (
+                            <div className="mt-3 text-xs text-gray-600 text-center">
+                              Original: {processedResults.result.original_size_kb} KB → 
+                              Converted: {processedResults.result.converted_size_kb} KB
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Download Button */}
+                        <div className="space-y-2">
+                          <button
+                            onClick={() => handleDownload('pdf')}
+                            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-4 rounded-lg transition-colors flex items-center justify-center"
+                          >
+                            <Download className="h-5 w-5 mr-2" />
+                            Download Searchable PDF
+                          </button>
+                        </div>
+                      </>
                     )}
 
                     {/* Searchable PDF Results */}

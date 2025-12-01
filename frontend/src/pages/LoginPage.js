@@ -64,17 +64,14 @@ const LoginPage = () => {
         {/* Header */}
         <div className="text-center">
           <div className="flex justify-center items-center mb-6">
-            <span className="text-3xl font-bold text-primary-600">
-              SearchablePDF
-            </span>
           </div>
           <h2 className="text-3xl font-bold text-gray-900 mb-2">
             {isLogin ? 'Welcome back' : 'Create your account'}
           </h2>
           <p className="text-gray-600">
             {isLogin 
-              ? 'Sign in to convert PDFs to searchable documents' 
-              : 'Create an account to start converting PDFs'
+              ? 'Sign in to process legacy manufacturing documents' 
+              : 'Create an account to start processing legacy manufacturing documents'
             }
           </p>
         </div>
