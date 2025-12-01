@@ -417,7 +417,7 @@ const Dashboard = () => {
                       />
                       <div className="ml-3">
                         <span className="text-sm font-medium text-gray-900">Create Searchable PDF (OCRmyPDF)</span>
-                        <p className="text-xs text-gray-500">Fast local conversion using Tesseract (free)</p>
+                        <p className="text-xs text-gray-500">Fast local conversion using Tesseract</p>
                       </div>
                     </label>
                     
@@ -431,8 +431,8 @@ const Dashboard = () => {
                         className="h-4 w-4 mt-0.5 text-primary-600 border-gray-300 focus:ring-primary-500"
                       />
                       <div className="ml-3">
-                        <span className="text-sm font-medium text-gray-900">Create Searchable PDF (ConvertAPI)</span>
-                        <p className="text-xs text-gray-500">Convert scanned PDF to searchable PDF using ConvertAPI</p>
+                        <span className="text-sm font-medium text-gray-900">Create Searchable PDF (Convert)</span>
+                        <p className="text-xs text-gray-500">Convert scanned PDF to searchable PDF using Convert</p>
                       </div>
                     </label>
                     
@@ -446,8 +446,8 @@ const Dashboard = () => {
                         className="h-4 w-4 mt-0.5 text-primary-600 border-gray-300 focus:ring-primary-500"
                       />
                       <div className="ml-3">
-                        <span className="text-sm font-medium text-gray-900">GLM-4.5V Table Extraction</span>
-                        <p className="text-xs text-gray-500">AI-powered table extraction using GLM vision model (CSV output)</p>
+                        <span className="text-sm font-medium text-gray-900">Table Extraction</span>
+                        <p className="text-xs text-gray-500">Table extraction using LLMs (CSV output)</p>
                       </div>
                     </label>
                     
@@ -461,8 +461,8 @@ const Dashboard = () => {
                         className="h-4 w-4 mt-0.5 text-primary-600 border-gray-300 focus:ring-primary-500"
                       />
                       <div className="ml-3">
-                        <span className="text-sm font-medium text-gray-900">GLM ABAQUS Generator (Serial Number)</span>
-                        <p className="text-xs text-gray-500">Extract stress-strain data & dimensions by serial number, generate .inp file</p>
+                        <span className="text-sm font-medium text-gray-900">Run ABAQUS Simulation (Serial Number)</span>
+                        <p className="text-xs text-gray-500">Extract stress-strain data & dimensions by serial number, generate .inp file, run the simulation to get .odb file</p>
                       </div>
                     </label>
                     
@@ -476,8 +476,8 @@ const Dashboard = () => {
                         className="h-4 w-4 mt-0.5 text-primary-600 border-gray-300 focus:ring-primary-500"
                       />
                       <div className="ml-3">
-                        <span className="text-sm font-medium text-gray-900">GLM Custom Query Extraction</span>
-                        <p className="text-xs text-gray-500">Extract specific data using custom queries with GLM-4.5V vision AI</p>
+                        <span className="text-sm font-medium text-gray-900">Custom Query</span>
+                        <p className="text-xs text-gray-500">Extract specific data using custom queries using LLMs</p>
                       </div>
                     </label>
                   </div>
@@ -563,7 +563,7 @@ const Dashboard = () => {
                   <div className="space-y-3 max-w-md mx-auto">
                     <div className="flex items-center justify-center text-blue-600">
                       <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
-                      OCR Processing in progress...
+                      Processing in progress...
                     </div>
                     <div className="bg-gray-200 rounded-full h-2">
                       <div className="bg-primary-600 h-2 rounded-full animate-pulse-soft" style={{width: '60%'}}></div>
@@ -599,7 +599,7 @@ const Dashboard = () => {
                           <AlertCircle className="h-6 w-6 text-red-500 flex-shrink-0 mt-0.5" />
                           <div className="flex-1">
                             <h4 className="text-sm font-semibold text-red-900 mb-2">
-                              Unstract Processing Error
+                              Processing Error
                             </h4>
                             <p className="text-sm text-red-800 mb-3">
                               {processedResults.message || processedResults.error}
@@ -683,7 +683,7 @@ const Dashboard = () => {
                           {simStatus === 'completed' && outputFiles && Object.keys(outputFiles).length > 0 && (
                             <div className="mt-4 border-t pt-3">
                               <h6 className="text-xs font-semibold mb-2 text-gray-700">
-                                📊 Download Simulation Results
+                                Download Simulation Results
                               </h6>
                               <div className="grid grid-cols-2 gap-2">
                                 {outputFiles.dat && (
@@ -729,7 +729,7 @@ const Dashboard = () => {
                           {/* Processing info */}
                           {processedResults.pages_processed && (
                             <div className="mt-3 text-xs text-blue-700">
-                              📄 Processed {processedResults.pages_processed} pages with GPT-4o Vision
+                              Processed {processedResults.pages_processed} pages with GPT-4o Vision
                             </div>
                           )}
                         </div>
@@ -813,7 +813,7 @@ const Dashboard = () => {
                       <div className="space-y-4">
                         <div className="border rounded-lg p-4 bg-gradient-to-r from-teal-50 to-cyan-50 border-teal-200">
                           <h4 className="text-sm font-semibold mb-2 text-teal-900 flex items-center gap-2">
-                            📊 GLM-4.5V Table Extraction Complete
+                            Table Extraction Complete
                           </h4>
                           
                           {/* Download CSV button */}
@@ -844,7 +844,7 @@ const Dashboard = () => {
                           {/* Processing info */}
                           {processedResults.pages_processed && (
                             <div className="mt-3 text-xs text-teal-700">
-                              📄 Processed {processedResults.pages_processed} pages with GLM-4.5V vision model
+                              Processed {processedResults.pages_processed} pages with GLM-4.5V vision model
                             </div>
                           )}
                           
@@ -860,7 +860,7 @@ const Dashboard = () => {
                         {processedResults.extracted_content && (
                           <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
                             <h5 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
-                              <span className="text-teal-600">📋</span> Extracted Tables Preview (First 500 chars)
+                               Extracted Tables Preview (First 500 chars)
                             </h5>
                             <div className="bg-gray-50 rounded p-3">
                               <pre className="text-xs text-gray-800 whitespace-pre-wrap font-mono">
@@ -871,7 +871,7 @@ const Dashboard = () => {
                               </pre>
                             </div>
                             <p className="text-xs text-gray-500 mt-2">
-                              ℹ️ Download the CSV file to see complete extracted tables
+                              Download the CSV file to see complete extracted tables
                             </p>
                           </div>
                         )}
@@ -883,13 +883,13 @@ const Dashboard = () => {
                       <div className="space-y-4">
                         <div className="border rounded-lg p-4 bg-gradient-to-r from-green-50 to-emerald-50 border-green-200">
                           <h4 className="text-sm font-semibold mb-2 text-green-900 flex items-center gap-2">
-                            🔍 GLM-4.5V Custom Query Extraction Complete
+                            GLM-4.5V Custom Query Extraction Complete
                           </h4>
                           
                           {/* Display the query */}
                           {processedResults.result && processedResults.result.query && (
                             <div className="mt-3 bg-white border border-green-200 rounded p-3">
-                              <p className="text-xs font-semibold text-gray-700 mb-1">📝 Your Query:</p>
+                              <p className="text-xs font-semibold text-gray-700 mb-1">Your Query:</p>
                               <p className="text-xs text-gray-800 italic">"{processedResults.result.query}"</p>
                             </div>
                           )}
@@ -918,9 +918,7 @@ const Dashboard = () => {
                                   </div>
                                 </div>
                             <div className="mt-3 flex items-center gap-2 text-xs text-gray-500">
-                              <span>✨ Powered by GLM-4.5V Vision AI</span>
-                              <span>•</span>
-                              <span>📄 {processedResults.result.extracted_text.length} characters</span>
+                              <span>{processedResults.result.extracted_text.length} characters</span>
                             </div>
                           </div>
                         )}
@@ -932,7 +930,7 @@ const Dashboard = () => {
                       <div className="space-y-4">
                         <div className="border rounded-lg p-4 bg-gradient-to-r from-purple-50 to-indigo-50 border-purple-200">
                           <h4 className="text-sm font-semibold mb-2 text-purple-900 flex items-center gap-2">
-                            🔧 GLM ABAQUS Generator Complete
+                            ABAQUS Generator Complete
                           </h4>
                           
                           {/* Extracted Dimensions */}
@@ -942,15 +940,12 @@ const Dashboard = () => {
                                 <div className="bg-white rounded p-2 border border-purple-200">
                                   <div className="text-xs text-gray-600">Length</div>
                                   <div className="text-sm font-semibold text-purple-900">{processedResults.length} mm</div>
-                                  <div className="text-xs text-purple-600">Scale: {processedResults.scale_factor_length?.toFixed(4)}</div>
                                 </div>
                               )}
                               {processedResults.diameter && (
                                 <div className="bg-white rounded p-2 border border-purple-200">
                                   <div className="text-xs text-gray-600">Diameter</div>
-                                  <div className="text-sm font-semibold text-purple-900">{processedResults.diameter} mm</div>
-                                  <div className="text-xs text-purple-600">Scale: {processedResults.scale_factor_diameter?.toFixed(4)}</div>
-                                </div>
+                                  <div className="text-sm font-semibold text-purple-900">{processedResults.diameter} mm</div>                                </div>
                               )}
                             </div>
                           )}
@@ -1035,7 +1030,7 @@ const Dashboard = () => {
                           
                           {processedResults.serial_number && (
                             <div className="mt-3 text-xs text-purple-700">
-                              📝 Serial Number: {processedResults.serial_number}
+                              Serial Number: {processedResults.serial_number}
                             </div>
                           )}
                           
@@ -1052,12 +1047,12 @@ const Dashboard = () => {
                                 )}
                                 {simStatus === 'completed' && (
                                   <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">
-                                    ✓ Completed
+                                    Completed
                                   </span>
                                 )}
                                 {simStatus === 'error' && (
                                   <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full">
-                                    ✗ Error
+                                    Error
                                   </span>
                                 )}
                               </h5>
@@ -1110,9 +1105,6 @@ const Dashboard = () => {
                                       </button>
                                     )}
                                   </div>
-                                  <p className="text-xs text-gray-500 mt-3">
-                                    💡 <strong>Tip:</strong> The .dat file contains numerical results. The .odb file requires ABAQUS Viewer.
-                                  </p>
                                 </div>
                               )}
                             </div>
@@ -1126,7 +1118,7 @@ const Dashboard = () => {
                       <div className="space-y-4">
                         <div className="border rounded-lg p-4 bg-gradient-to-r from-emerald-50 to-teal-50 border-emerald-200">
                           <h4 className="text-sm font-semibold mb-2 text-emerald-900 flex items-center gap-2">
-                            🔬 ABAQUS FEM Generation Complete
+                            ABAQUS FEM Generation Complete
                             <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">
                               Serial: {processedResults.extracted_data?.serial_number}
                             </span>
@@ -1446,25 +1438,10 @@ const Dashboard = () => {
                     {/* Local OCR Results */}
                     {processedResults.extraction_method !== 'unstract' && processedResults.extraction_method !== 'llmwhisperer' && processedResults.extraction_method !== 'direct_llm' && processedResults.extraction_method !== 'textract' && processedResults.extraction_method !== 'searchable_pdf' && (
                       <>
-                        {/* Summary */}
-                        <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-                          <p className="text-sm text-green-800 text-center">
-                            Your PDF has been successfully converted to a searchable document.
-                            {processedResults.tables && processedResults.tables.length > 0 && (
-                              ` Found ${processedResults.tables.length} table(s).`
-                            )}
-                          </p>
-                        </div>
 
                         {/* Download Options */}
                         <div className="space-y-2">
-                          <button
-                            onClick={() => handleDownload('pdf')}
-                            className="w-full btn-primary"
-                          >
-                            <Download className="h-4 w-4 mr-2" />
-                            Download Searchable PDF
-                          </button>
+
                           
                           {processedResults.tables && processedResults.tables.length > 0 && (
                             <button
