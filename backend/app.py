@@ -755,6 +755,7 @@ def convert_pdf_to_searchable_ocrmypdf(input_path, task_id, user_id):
             'status': 'completed',
             'message': 'Searchable PDF created successfully with OCRmyPDF',
             'progress': 100,
+            'extraction_method': 'ocrmypdf',
             'result': {
                 'output_file': output_filename,
                 'original_size_kb': round(os.path.getsize(input_path) / 1024, 2),
@@ -776,6 +777,7 @@ def convert_pdf_to_searchable_ocrmypdf(input_path, task_id, user_id):
             'status': 'completed',
             'message': 'PDF already contains searchable text',
             'progress': 100,
+            'extraction_method': 'ocrmypdf',
             'result': {
                 'output_file': output_filename,
                 'original_size_kb': round(os.path.getsize(input_path) / 1024, 2),
@@ -815,6 +817,10 @@ def convert_pdf_to_searchable_ocrmypdf(input_path, task_id, user_id):
 def convert_pdf_to_searchable_convertapi(input_path, task_id, user_id):
     """Convert PDF to searchable using ConvertAPI"""
     try:
+        logger.info(f"=== STARTING CONVERTAPI CONVERSION FOR TASK {task_id} ===")
+        logger.info(f"Input file: {input_path}")
+        logger.info(f"File size: {os.path.getsize(input_path)} bytes")
+        
         processing_status[task_id] = {
             'status': 'processing',
             'message': 'Converting PDF to searchable format with ConvertAPI...',
@@ -830,22 +836,30 @@ def convert_pdf_to_searchable_convertapi(input_path, task_id, user_id):
         processing_status[task_id]['message'] = 'Uploading to ConvertAPI...'
         processing_status[task_id]['progress'] = 30
         
-        # Convert using ConvertAPI
+        logger.info(f"Calling ConvertAPI with output filename: {output_filename}")
+        # Convert using ConvertAPI with timeout
         result = convertapi.convert('ocr', {
             'File': input_path,
-            'FileName': output_filename
+            'FileName': output_filename,
+            'Timeout': 300  # 5 minutes timeout
         }, from_format='pdf')
+        
+        logger.info(f"ConvertAPI returned result: {result}")
+        logger.info(f"ConvertAPI returned result: {result}")
         
         processing_status[task_id]['message'] = 'Downloading converted PDF...'
         processing_status[task_id]['progress'] = 60
         
+        logger.info(f"Saving files to output directory: {output_dir}")
         # Save the converted file
         saved_files = result.save_files(output_dir)
         
+        logger.info(f"Saved files: {saved_files}")
         if not saved_files or len(saved_files) == 0:
             raise Exception("No files were returned from ConvertAPI")
         
         output_path = saved_files[0]
+        logger.info(f"Output file path: {output_path}")
         
         processing_status[task_id]['message'] = 'Searchable PDF created successfully!'
         processing_status[task_id]['progress'] = 90
@@ -864,6 +878,7 @@ def convert_pdf_to_searchable_convertapi(input_path, task_id, user_id):
             'status': 'completed',
             'message': 'Searchable PDF created successfully',
             'progress': 100,
+            'extraction_method': 'convertapi_ocr',
             'result': {
                 'output_file': os.path.basename(output_path),
                 'original_size_kb': round(os.path.getsize(input_path) / 1024, 2),
@@ -875,7 +890,12 @@ def convert_pdf_to_searchable_convertapi(input_path, task_id, user_id):
         logger.info(f"ConvertAPI conversion completed for task {task_id}")
         
     except Exception as e:
-        logger.error(f"ConvertAPI conversion failed for task {task_id}: {str(e)}")
+        import traceback
+        error_details = traceback.format_exc()
+        logger.error(f"=== CONVERTAPI CONVERSION FAILED FOR TASK {task_id} ===")
+        logger.error(f"Error: {str(e)}")
+        logger.error(f"Full traceback:\n{error_details}")
+        
         processing_status[task_id] = {
             'status': 'failed',
             'message': f'ConvertAPI conversion failed: {str(e)}',
