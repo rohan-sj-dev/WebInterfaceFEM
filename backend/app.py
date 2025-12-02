@@ -2179,36 +2179,66 @@ def open_abaqus_viewer(sim_task_id):
         odb_file = output_files.get('odb')
         
         if not odb_file or not os.path.exists(odb_file):
+            logger.error(f"ODB file not found: {odb_file}")
             return jsonify({'error': 'ODB file not found. Simulation may have failed.'}), 404
         
         # Launch ABAQUS Viewer with the .odb file
         import subprocess
         
+        # Get absolute path
+        odb_file_abs = os.path.abspath(odb_file)
+        odb_dir = os.path.dirname(odb_file_abs)
+        
         # ABAQUS Viewer command: abaqus viewer database=<odb_file>
-        viewer_cmd = f'abaqus viewer database="{odb_file}"'
+        # Use 'abq2025' or 'abaqus' depending on installation
+        viewer_cmd = f'abaqus viewer database="{odb_file_abs}"'
         
-        logger.info(f"Opening ABAQUS Viewer: {viewer_cmd}")
+        logger.info(f"Opening ABAQUS Viewer with command: {viewer_cmd}")
+        logger.info(f"Working directory: {odb_dir}")
+        logger.info(f"ODB file exists: {os.path.exists(odb_file_abs)}")
         
-        # Launch in background without blocking
-        subprocess.Popen(
-            viewer_cmd,
-            shell=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            cwd=os.path.dirname(odb_file)
-        )
+        # Try to launch - capture stderr to see what's wrong
+        try:
+            process = subprocess.Popen(
+                viewer_cmd,
+                shell=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                cwd=odb_dir,
+                text=True
+            )
+            
+            # Wait a moment to see if it fails immediately
+            import time
+            time.sleep(1)
+            
+            # Check if process is still running
+            poll_result = process.poll()
+            if poll_result is not None:
+                # Process exited immediately - get error
+                stdout, stderr = process.communicate()
+                error_msg = stderr or stdout or f"Process exited with code {poll_result}"
+                logger.error(f"ABAQUS Viewer failed to start: {error_msg}")
+                return jsonify({
+                    'error': f'ABAQUS Viewer failed to start: {error_msg}',
+                    'command': viewer_cmd
+                }), 500
+            
+            logger.info("ABAQUS Viewer process started successfully")
+            return jsonify({
+                'success': True,
+                'message': 'ABAQUS Viewer launched successfully',
+                'odb_file': os.path.basename(odb_file_abs)
+            }), 200
+            
+        except FileNotFoundError as e:
+            logger.error(f"ABAQUS executable not found: {str(e)}")
+            return jsonify({'error': 'ABAQUS not found. Please ensure ABAQUS is installed and in PATH.'}), 500
         
-        return jsonify({
-            'success': True,
-            'message': 'ABAQUS Viewer launched successfully',
-            'odb_file': os.path.basename(odb_file)
-        }), 200
-        
-    except FileNotFoundError:
-        logger.error("ABAQUS executable not found")
-        return jsonify({'error': 'ABAQUS not found. Please ensure ABAQUS is installed and in PATH.'}), 500
     except Exception as e:
-        logger.error(f"Error opening ABAQUS Viewer: {str(e)}")
+        import traceback
+        error_trace = traceback.format_exc()
+        logger.error(f"Error opening ABAQUS Viewer: {str(e)}\n{error_trace}")
         return jsonify({'error': str(e)}), 500
 
 
