@@ -121,10 +121,14 @@ const Dashboard = () => {
   const handleOpenAbaqusViewer = async () => {
     try {
       const response = await ocrService.openAbaqusViewer(simTaskId);
-      if (response.data?.success) {
+      console.log('ABAQUS Viewer response:', response);
+      
+      // Check both response.data and response.data.success
+      const data = response.data || response;
+      if (data.success) {
         toast.success('ABAQUS Viewer launched successfully!');
       } else {
-        toast.error('Failed to launch ABAQUS Viewer');
+        toast.error(data.error || 'Failed to launch ABAQUS Viewer');
       }
     } catch (error) {
       console.error('Error opening ABAQUS Viewer:', error);
