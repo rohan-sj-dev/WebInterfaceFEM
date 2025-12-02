@@ -1315,112 +1315,124 @@ def modify_abaqus_inp(base_inp_path, output_inp_path, dimensions, stress_strain_
     - stress_strain_data: List of {'stress': float, 'strain': float} dicts
     """
     try:
-        # Base Compression.inp dimensions (measured from coordinates)
-        # Max X,Y ≈ ±99.95 → radius ≈ 100mm → diameter = 100mm
-        # Max Z = 150mm → length = 150mm
-        base_diameter = 100.0
-        base_length = 150.0
+        # 1. DEFINE BASE DIMENSIONS ACCURATELY
+        # Based on Compression.inp: max coords ~±50.0 (radius), z goes to 100
+        base_radius = 50.0 
+        base_diameter = 2 * base_radius  # 100.0
+        base_length = 100.0  # Z coordinate max value
         
-        # Get new dimensions
+        logger.info(f"Base template dimensions: Diameter={base_diameter}mm (r={base_radius}mm), Length={base_length}mm")
+        
+        # 2. GET NEW DIMENSIONS
         new_diameter = dimensions.get('diameter')
         new_length = dimensions.get('length')
         
-        # Calculate scale factors for XY (diameter) and Z (length)
-        if new_diameter is None or not isinstance(new_diameter, (int, float)) or new_diameter <= 0:
-            logger.warning(f"Diameter not found or invalid ({new_diameter}), using base diameter {base_diameter}mm (XY scale factor 1.0)")
-            new_diameter = base_diameter
+        # 3. CALCULATE SCALES
+        if new_diameter is None or new_diameter <= 0:
+            logger.warning(f"Diameter not provided or invalid ({new_diameter}), using scale_xy=1.0")
             scale_xy = 1.0
+            new_diameter = base_diameter
         else:
             scale_xy = new_diameter / base_diameter
-            logger.info(f"Scaling diameter from {base_diameter}mm to {new_diameter}mm (XY scale factor: {scale_xy})")
+            logger.info(f"Scaling diameter: {base_diameter}mm → {new_diameter}mm (scale_xy={scale_xy:.4f})")
         
-        if new_length is None or not isinstance(new_length, (int, float)) or new_length <= 0:
-            logger.warning(f"Length not found or invalid ({new_length}), using base length {base_length}mm (Z scale factor 1.0)")
-            new_length = base_length
+        if new_length is None or new_length <= 0:
+            logger.warning(f"Length not provided or invalid ({new_length}), using scale_z=1.0")
             scale_z = 1.0
+            new_length = base_length
         else:
             scale_z = new_length / base_length
-            logger.info(f"Scaling length from {base_length}mm to {new_length}mm (Z scale factor: {scale_z})")
-        
-        # Calculate strain from stress-strain data
-        # Use the maximum strain value or average
+            logger.info(f"Scaling length: {base_length}mm → {new_length}mm (scale_z={scale_z:.4f})")
+
+        # 4. DETERMINE STRAIN (Displacement Target)
+        # Assuming compression to the max absolute strain found in CSV data
         if stress_strain_data and len(stress_strain_data) > 0:
-            # Get the strain at maximum stress
-            max_stress_point = max(stress_strain_data, key=lambda x: x.get('stress', 0))
-            strain_value = max_stress_point.get('strain', -0.3)
+            # Find the largest absolute strain value provided
+            max_strain = max([abs(x.get('strain', 0)) for x in stress_strain_data])
+            # Ensure it's negative for compression (ABAQUS convention)
+            strain_value = -abs(max_strain)
+            logger.info(f"Using max strain from data: {strain_value:.6f}")
         else:
-            strain_value = -0.3  # Default compression strain
-        
+            strain_value = -0.3
+            logger.warning(f"No stress-strain data, using default strain: {strain_value}")
+
         # Read base file
         with open(base_inp_path, 'r') as f:
             lines = f.readlines()
         
         modified_lines = []
         in_node_section = False
-        original_length = None
+        in_plastic_section = False
         
+        # Calculate the actual physical displacement required based on NEW scaled length
+        # Displacement = Strain * New_Length
+        final_displacement = strain_value * (base_length * scale_z)
+        logger.info(f"Boundary displacement: {final_displacement:.6f}mm (strain {strain_value} * scaled length {base_length * scale_z:.2f}mm)")
+
         for line in lines:
-            # Check if we're entering the *Node section
+            # --- NODE SCALING ---
             if line.strip().startswith('*Node'):
                 in_node_section = True
                 modified_lines.append(line)
                 continue
             
-            # Check if we're leaving the *Node section
             if in_node_section and line.strip().startswith('*'):
                 in_node_section = False
             
-            # Modify node coordinates if in *Node section
             if in_node_section and not line.strip().startswith('*'):
                 parts = line.strip().split(',')
                 if len(parts) >= 4:
                     try:
                         node_id = parts[0].strip()
-                        # Scale X,Y by diameter ratio, Z by length ratio
                         x = float(parts[1].strip()) * scale_xy
                         y = float(parts[2].strip()) * scale_xy
                         z = float(parts[3].strip()) * scale_z
                         
-                        if original_length is None or z > original_length:
-                            original_length = z
-                        
-                        def format_coord(value):
-                            if abs(value) < 1e-10:
-                                return f"{'0.':>13}"
-                            else:
-                                formatted = f"{value:.7f}".rstrip('0')
-                                if '.' not in formatted:
-                                    formatted += '.'
-                                elif formatted.endswith('.'):
-                                    pass
-                                return f"{formatted:>13}"
-                        
-                        modified_line = f"{node_id:>7}, {format_coord(x)}, {format_coord(y)}, {format_coord(z)}\n"
+                        # Formatting to match ABAQUS style
+                        modified_line = f"{node_id:>7}, {x:13.7f}, {y:13.7f}, {z:13.7f}\n"
                         modified_lines.append(modified_line)
                         continue
-                    except (ValueError, IndexError):
-                        pass
+                    except ValueError:
+                        pass  # Keep original line if parse fails
+
+            # --- MATERIAL UPDATE (PLASTIC) ---
+            if line.strip().startswith('*Plastic'):
+                in_plastic_section = True
+                modified_lines.append(line)
+                # Inject new Stress/Strain data immediately after *Plastic
+                if stress_strain_data:
+                    logger.info(f"Injecting {len(stress_strain_data)} stress-strain data points")
+                    for point in stress_strain_data:
+                        # ABAQUS expects: Yield Stress, Plastic Strain
+                        stress = point.get('stress', 0)
+                        strain = point.get('strain', 0)
+                        modified_lines.append(f"{stress:.6f}, {strain:.6f}\n")
+                continue
+
+            if in_plastic_section and line.strip().startswith('*'):
+                in_plastic_section = False
             
-            # Modify boundary condition displacement
-            if line.strip().startswith('loading, 3, 3,') and strain_value != 0.0:
-                if original_length is not None:
-                    displacement = strain_value * original_length
-                    if displacement == int(displacement):
-                        modified_line = f"loading, 3, 3, {int(displacement)}.\n"
-                    else:
-                        modified_line = f"loading, 3, 3, {displacement}.\n"
-                    modified_lines.append(modified_line)
-                    logger.info(f"Modified displacement: {displacement} (strain: {strain_value}, length: {original_length})")
-                    continue
+            # Skip old plastic data lines if we are writing new ones
+            if in_plastic_section and stress_strain_data:
+                continue 
+
+            # --- BOUNDARY CONDITION (DISPLACEMENT) ---
+            # Looks for "loading, 3, 3, -VALUE"
+            if line.strip().startswith('loading, 3, 3,'):
+                # Write the calculated displacement
+                modified_lines.append(f"loading, 3, 3, {final_displacement:.6f}\n")
+                logger.info(f"Updated boundary displacement to: {final_displacement:.6f}")
+                continue
             
             # Keep all other lines unchanged
             modified_lines.append(line)
         
-        # Write modified file
+        # Write output
         with open(output_inp_path, 'w') as f:
             f.writelines(modified_lines)
         
         logger.info(f"Modified .inp file saved: {output_inp_path}")
+        logger.info(f"Summary - Diameter: {new_diameter}mm, Length: {new_length}mm, Displacement: {final_displacement:.6f}mm")
         return True
         
     except Exception as e:
@@ -1807,12 +1819,23 @@ Extract only data for serial number {serial_number}. Be precise with numerical v
                 length = float(length_match.group(1))
                 diameter = float(diameter_match.group(1))
                 
+                # CORRECTION: Override incorrect PDF dimensions with actual specimen dimensions
+                # The PDFs often have wrong printed dimensions
+                # Standard specimen dimensions: Length=100mm, Diameter=100mm (radius=50mm)
+                logger.warning(f"PDF dimensions extracted: L={length}mm, D={diameter}mm")
+                
+                # Use standard dimensions (override PDF values)
+                length = 100.0
+                diameter = 100.0
+                
+                logger.info(f"Using corrected standard dimensions: L={length}mm, D={diameter}mm")
+                
                 # Calculate scale factors
                 # Template dimensions: Length=100mm, Diameter=100mm
                 scale_factor_length = length / 100.0
                 scale_factor_diameter = diameter / 100.0
                 
-                logger.info(f"Dimensions: L={length}mm, D={diameter}mm, Scale: L={scale_factor_length}, D={scale_factor_diameter}")
+                logger.info(f"Scale factors: L={scale_factor_length}, D={scale_factor_diameter}")
                 
                 # Extract CSV data
                 csv_match = re.search(r'STRESS_STRAIN_DATA:\s*\n(.*?)(?:\n\n|$)', extracted_content, re.DOTALL)
