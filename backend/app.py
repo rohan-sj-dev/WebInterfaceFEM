@@ -1316,10 +1316,10 @@ def modify_abaqus_inp(base_inp_path, output_inp_path, dimensions, stress_strain_
     """
     try:
         # 1. DEFINE BASE DIMENSIONS ACCURATELY
-        # Based on Compression.inp: max coords ~±50.0 (radius), z goes to 100
+        # Based on Compression.inp: max coords ~±50.0 (radius), z goes to 150
         base_radius = 50.0 
         base_diameter = 2 * base_radius  # 100.0
-        base_length = 100.0  # Z coordinate max value
+        base_length = 150.0  # Z coordinate max value
         
         logger.info(f"Base template dimensions: Diameter={base_diameter}mm (r={base_radius}mm), Length={base_length}mm")
         
