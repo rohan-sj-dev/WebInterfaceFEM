@@ -1819,23 +1819,7 @@ Extract only data for serial number {serial_number}. Be precise with numerical v
                 length = float(length_match.group(1))
                 diameter = float(diameter_match.group(1))
                 
-                # CORRECTION: Override incorrect PDF dimensions with actual specimen dimensions
-                # The PDFs often have wrong printed dimensions
-                # Standard specimen dimensions: Length=100mm, Diameter=100mm (radius=50mm)
-                logger.warning(f"PDF dimensions extracted: L={length}mm, D={diameter}mm")
-                
-                # Use standard dimensions (override PDF values)
-                length = 100.0
-                diameter = 100.0
-                
-                logger.info(f"Using corrected standard dimensions: L={length}mm, D={diameter}mm")
-                
-                # Calculate scale factors
-                # Template dimensions: Length=100mm, Diameter=100mm
-                scale_factor_length = length / 100.0
-                scale_factor_diameter = diameter / 100.0
-                
-                logger.info(f"Scale factors: L={scale_factor_length}, D={scale_factor_diameter}")
+                logger.info(f"Extracted dimensions from PDF: Length={length}mm, Diameter={diameter}mm")
                 
                 # Extract CSV data
                 csv_match = re.search(r'STRESS_STRAIN_DATA:\s*\n(.*?)(?:\n\n|$)', extracted_content, re.DOTALL)
@@ -1857,26 +1841,40 @@ Extract only data for serial number {serial_number}. Be precise with numerical v
                     f.write("Sample ID,Stress,Strain\n")
                     f.write(stress_strain_csv)
                 
+                # Parse stress-strain data from CSV
+                stress_strain_list = []
+                for line in stress_strain_csv.strip().split('\n'):
+                    parts = line.split(',')
+                    if len(parts) >= 3:
+                        try:
+                            stress = float(parts[1].strip())
+                            strain = float(parts[2].strip())
+                            stress_strain_list.append({'stress': stress, 'strain': strain})
+                        except ValueError:
+                            continue
+                
+                logger.info(f"Parsed {len(stress_strain_list)} stress-strain data points")
+                
                 task_status['progress'] = 70
                 task_status['message'] = 'Generating ABAQUS input file...'
                 
-                # Run modify_abaqus_input.py
-                from modify_abaqus_input import modify_abaqus_file
-                
+                # Use improved modify_abaqus_inp function
                 base_inp = "Compression.inp"
                 output_inp_filename = f"Compression_{serial_number}_{timestamp}.inp"
                 output_inp_path = os.path.join(OUTPUT_FOLDER, output_inp_filename)
                 
-                # Calculate strain (assume max strain from data or use -0.18 as default)
-                strain = -0.18  # Default compression strain
+                # Prepare dimensions dict
+                dimensions = {
+                    'diameter': diameter,
+                    'length': length
+                }
                 
-                modify_abaqus_file(
+                # Call improved function
+                modify_abaqus_inp(
                     base_inp,
                     output_inp_path,
-                    scale_factor_d=scale_factor_diameter,
-                    scale_factor=scale_factor_length,
-                    strain=strain,
-                    stress_strain_csv=csv_path
+                    dimensions,
+                    stress_strain_list
                 )
                 
                 logger.info(f"ABAQUS file generated: {output_inp_path}")
@@ -1889,8 +1887,6 @@ Extract only data for serial number {serial_number}. Be precise with numerical v
                 task_status['csv_file'] = csv_filename
                 task_status['length'] = length
                 task_status['diameter'] = diameter
-                task_status['scale_factor_length'] = scale_factor_length
-                task_status['scale_factor_diameter'] = scale_factor_diameter
                 task_status['extracted_content'] = extracted_content
                 
             except Exception as e:
