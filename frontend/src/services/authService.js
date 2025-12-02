@@ -172,6 +172,10 @@ export const ocrService = {
     return response;
   },
 
+  openAbaqusViewer: async (simTaskId) => {
+    return await api.post(`/open_abaqus_viewer/${simTaskId}`);
+  },
+
   getStatus: async (taskId) => {
     return await api.get(`/status/${taskId}`);
   },

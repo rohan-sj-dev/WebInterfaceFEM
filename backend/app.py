@@ -2146,6 +2146,71 @@ def download_simulation_result(sim_task_id, file_type):
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/open_abaqus_viewer/<sim_task_id>', methods=['POST'])
+@jwt_required()
+def open_abaqus_viewer(sim_task_id):
+    """Open ABAQUS Viewer with the .odb file from the completed simulation"""
+    try:
+        user_id = get_jwt_identity()
+        try:
+            user_id_int = int(user_id)
+        except (ValueError, TypeError):
+            user_id_int = user_id
+        
+        if sim_task_id not in processing_status:
+            return jsonify({'error': 'Simulation task not found'}), 404
+        
+        sim_data = processing_status[sim_task_id]
+        
+        # Authorization check
+        status_user_id = sim_data.get('user_id')
+        try:
+            status_user_id_int = int(status_user_id)
+        except (ValueError, TypeError):
+            status_user_id_int = status_user_id
+        
+        if status_user_id_int != user_id_int and str(status_user_id) != str(user_id):
+            return jsonify({'error': 'Unauthorized'}), 403
+        
+        if sim_data.get('status') != 'completed':
+            return jsonify({'error': 'Simulation not completed yet'}), 400
+        
+        output_files = sim_data.get('output_files', {})
+        odb_file = output_files.get('odb')
+        
+        if not odb_file or not os.path.exists(odb_file):
+            return jsonify({'error': 'ODB file not found. Simulation may have failed.'}), 404
+        
+        # Launch ABAQUS Viewer with the .odb file
+        import subprocess
+        
+        # ABAQUS Viewer command: abaqus viewer database=<odb_file>
+        viewer_cmd = f'abaqus viewer database="{odb_file}"'
+        
+        logger.info(f"Opening ABAQUS Viewer: {viewer_cmd}")
+        
+        # Launch in background without blocking
+        subprocess.Popen(
+            viewer_cmd,
+            shell=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            cwd=os.path.dirname(odb_file)
+        )
+        
+        return jsonify({
+            'success': True,
+            'message': 'ABAQUS Viewer launched successfully',
+            'odb_file': os.path.basename(odb_file)
+        }), 200
+        
+    except FileNotFoundError:
+        logger.error("ABAQUS executable not found")
+        return jsonify({'error': 'ABAQUS not found. Please ensure ABAQUS is installed and in PATH.'}), 500
+    except Exception as e:
+        logger.error(f"Error opening ABAQUS Viewer: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5001)
