@@ -1399,6 +1399,18 @@ const Dashboard = () => {
                     {processedResults.extraction_method === 'ocrmypdf' && (
                       <>
                         {/* Summary */}
+                        <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-4">
+                          <div className="flex items-center justify-center mb-2">
+                            <CheckCircle className="h-6 w-6 text-green-600 mr-2" />
+                            
+                          </div>
+                          {processedResults.result && (
+                            <div className="mt-3 text-xs text-gray-600 text-center">
+                              Original: {processedResults.result.original_size_kb} KB → 
+                              Converted: {processedResults.result.converted_size_kb} KB
+                            </div>
+                          )}
+                        </div>
 
                         {/* Download Button */}
                         <div className="space-y-2">
@@ -1427,13 +1439,6 @@ const Dashboard = () => {
                           <p className="text-sm text-blue-800 text-center">
                             Your scanned PDF has been converted to a searchable PDF using ConvertAPI cloud OCR.
                           </p>
-                          <div className="mt-3 p-3 bg-white border border-blue-200 rounded">
-                            <p className="text-xs text-gray-700 text-center">
-                              ✨ Cloud-based OCR processing<br/>
-                              🔍 Text layer added - searchable with Ctrl+F<br/>
-                              📄 High-accuracy commercial OCR
-                            </p>
-                          </div>
                           {processedResults.result && (
                             <div className="mt-3 text-xs text-gray-600 text-center">
                               Original: {processedResults.result.original_size_kb} KB → 

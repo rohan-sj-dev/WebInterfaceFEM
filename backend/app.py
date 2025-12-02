@@ -700,11 +700,11 @@ def process_pdf_with_glm_custom_query(input_path, task_id, user_id, custom_query
         conn.close()
 
 def convert_pdf_to_searchable_ocrmypdf(input_path, task_id, user_id):
-    """Convert PDF to searchable using OCRmyPDF (local, fast)"""
+    """Convert PDF to searchable using OCRmyPDF command-line tool"""
     try:
         processing_status[task_id] = {
             'status': 'processing',
-            'message': 'Converting PDF to searchable format with OCRmyPDF (local)...',
+            'message': 'Converting PDF to searchable format with OCRmyPDF...',
             'progress': 10,
             'user_id': user_id
         }
@@ -714,34 +714,40 @@ def convert_pdf_to_searchable_ocrmypdf(input_path, task_id, user_id):
         output_filename = f"{base_name}-converted.pdf"
         output_path = os.path.join(OUTPUT_FOLDER, output_filename)
         
-        processing_status[task_id]['message'] = 'Running OCR with Tesseract...'
+        processing_status[task_id]['message'] = 'Running OCRmyPDF command...'
         processing_status[task_id]['progress'] = 30
         
-        # Suppress OCRmyPDF verbose logging
-        ocrmypdf_logger = logging.getLogger('ocrmypdf')
-        original_level = ocrmypdf_logger.level
-        ocrmypdf_logger.setLevel(logging.ERROR)
+        # Run ocrmypdf command-line tool
+        import subprocess
+        cmd = [
+            'ocrmypdf',
+            '--language', 'eng',
+            '--deskew',
+            '--optimize', '1',
+            '--skip-text',
+            input_path,
+            output_path
+        ]
         
-        try:
-            # Convert using OCRmyPDF
-            ocrmypdf.ocr(
-                input_path,
-                output_path,
-                language='eng',           # English language
-                deskew=True,              # Straighten pages
-                optimize=1,               # Optimize output file size
-                skip_text=True,           # Skip pages that already have text
-                force_ocr=False,          # Don't OCR pages that already have text
-                progress_bar=False        # No progress bar in background
-            )
-        finally:
-            # Restore original logging level
-            ocrmypdf_logger.setLevel(original_level)
+        logger.info(f"Running command: {' '.join(cmd)}")
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=300  # 5 minute timeout
+        )
+        
+        if result.returncode != 0:
+            error_msg = result.stderr or result.stdout or "Unknown error"
+            logger.error(f"OCRmyPDF command failed: {error_msg}")
+            raise Exception(f"OCRmyPDF failed: {error_msg}")
+        
+        logger.info(f"OCRmyPDF output: {result.stdout}")
         
         processing_status[task_id]['message'] = 'Searchable PDF created successfully!'
         processing_status[task_id]['progress'] = 90
         
-        # Update database status only
+        # Update database
         conn = sqlite3.connect('users.db')
         cursor = conn.cursor()
         cursor.execute(
@@ -759,39 +765,26 @@ def convert_pdf_to_searchable_ocrmypdf(input_path, task_id, user_id):
             'result': {
                 'output_file': output_filename,
                 'original_size_kb': round(os.path.getsize(input_path) / 1024, 2),
-                'converted_size_kb': round(os.path.getsize(output_path) / 1024, 2)
+                'converted_size_kb': round(os.path.getsize(output_path) / 1024, 2),
+                'ocrmypdf_output': result.stdout
             },
             'user_id': user_id
         }
         
         logger.info(f"OCRmyPDF conversion completed for task {task_id}")
         
-    except ocrmypdf.exceptions.PriorOcrFoundError:
-        # PDF already has text, just copy it
-        output_filename = f"{os.path.splitext(os.path.basename(input_path))[0]}-converted.pdf"
-        output_path = os.path.join(OUTPUT_FOLDER, output_filename)
-        import shutil
-        shutil.copy2(input_path, output_path)
-        
+    except subprocess.TimeoutExpired:
+        logger.error(f"OCRmyPDF conversion timed out for task {task_id}")
         processing_status[task_id] = {
-            'status': 'completed',
-            'message': 'PDF already contains searchable text',
-            'progress': 100,
-            'extraction_method': 'ocrmypdf',
-            'result': {
-                'output_file': output_filename,
-                'original_size_kb': round(os.path.getsize(input_path) / 1024, 2),
-                'converted_size_kb': round(os.path.getsize(output_path) / 1024, 2)
-            },
+            'status': 'failed',
+            'message': 'OCRmyPDF conversion timed out after 5 minutes',
+            'progress': 0,
             'user_id': user_id
         }
         
         conn = sqlite3.connect('users.db')
         cursor = conn.cursor()
-        cursor.execute(
-            'UPDATE processing_jobs SET status = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?',
-            ('completed', task_id)
-        )
+        cursor.execute('UPDATE processing_jobs SET status = ? WHERE id = ?', ('failed', task_id))
         conn.commit()
         conn.close()
         
@@ -804,13 +797,9 @@ def convert_pdf_to_searchable_ocrmypdf(input_path, task_id, user_id):
             'user_id': user_id
         }
         
-        # Update database status only
         conn = sqlite3.connect('users.db')
         cursor = conn.cursor()
-        cursor.execute(
-            'UPDATE processing_jobs SET status = ? WHERE id = ?',
-            ('failed', task_id)
-        )
+        cursor.execute('UPDATE processing_jobs SET status = ? WHERE id = ?', ('failed', task_id))
         conn.commit()
         conn.close()
 
